@@ -17,7 +17,9 @@ app.use(express.static('public'));
 app.post('/', async (req, res) => {
   try {
     console.log('=== Help Scout Request Start ===');
+    console.log('Headers:', req.headers);
     console.log('URL Parameters:', req.query);
+    console.log('Body:', req.body);
     console.log('Route Parameters:', req.params);
     console.log('=== Help Scout Request End ===');
     
@@ -40,7 +42,10 @@ app.post('/', async (req, res) => {
         html: `
           <div style="padding: 20px; font-family: Arial, sans-serif;">
             <h3>📊 Response Evaluator</h3>
-            <p>No ticket data received from Help Scout.</p>
+            <p><strong>Debug: No ticket ID found</strong></p>
+            <p><strong>Query params:</strong> ${JSON.stringify(req.query)}</p>
+            <p><strong>Body data:</strong> ${JSON.stringify(req.body)}</p>
+            <p><strong>Headers:</strong> ${JSON.stringify(req.headers['content-type'])}</p>
           </div>
         `
       });
