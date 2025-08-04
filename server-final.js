@@ -186,7 +186,13 @@ function findLatestTeamResponse(conversation) {
   );
 
   for (const thread of threads) {
-    if (thread.type === 'message' && thread.createdBy?.type === 'user' && thread.body) {
+    // Check both createdBy formats (string and object)
+    const isUser = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
+    
+    console.log(`Checking thread: type=${thread.type}, isUser=${isUser}, hasBody=${!!thread.body}`);
+    
+    if (thread.type === 'message' && isUser && thread.body) {
+      console.log('Found matching team response!');
       return {
         text: thread.body,
         createdAt: thread.createdAt,
