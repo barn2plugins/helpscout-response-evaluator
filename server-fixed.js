@@ -14,7 +14,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
 // Help Scout webhook endpoint - this is what Help Scout calls
-app.get('/mailbox/:mailboxId/plugin/:pluginId.json', async (req, res) => {
+app.post('/', async (req, res) => {
   try {
     console.log('=== Help Scout Request Start ===');
     console.log('URL Parameters:', req.query);
