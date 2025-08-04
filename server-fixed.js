@@ -98,6 +98,27 @@ app.get('/widget', (req, res) => {
   `);
 });
 
+// Catch-all route for debugging
+app.all('*', (req, res) => {
+  console.log('=== UNKNOWN REQUEST ===');
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  console.log('Path:', req.path);
+  console.log('Query:', req.query);
+  console.log('=== END UNKNOWN REQUEST ===');
+  
+  res.json({
+    html: `
+      <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <h3>📊 Response Evaluator - Debug</h3>
+        <p><strong>URL called:</strong> ${req.url}</p>
+        <p><strong>Method:</strong> ${req.method}</p>
+        <p><strong>Path:</strong> ${req.path}</p>
+      </div>
+    `
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Fixed server running on 0.0.0.0:${PORT}`);
   console.log('Environment variables check:');
