@@ -73,10 +73,35 @@ app.post('/', async (req, res) => {
     const isShopify = detectShopifyContext(conversation);
     console.log('Is Shopify:', isShopify);
     
-    // Evaluate the response using OpenAI
-    console.log('Starting OpenAI evaluation...');
-    const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
-    console.log('OpenAI evaluation completed');
+    // Evaluate the response using OpenAI with timeout handling
+    console.log('Starting OpenAI evaluation with timeout...');
+    
+    // Set up a timeout promise
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        console.log('OpenAI evaluation timed out');
+        resolve({
+          overall_score: 0,
+          categories: {
+            tone_empathy: { score: 0, feedback: "Evaluation timed out - please try again" },
+            clarity_completeness: { score: 0, feedback: "Evaluation timed out - please try again" },
+            standard_of_english: { score: 0, feedback: "Evaluation timed out - please try again" },
+            problem_resolution: { score: 0, feedback: "Evaluation timed out - please try again" },
+            following_structure: { score: 0, feedback: "Evaluation timed out - please try again" }
+          },
+          key_improvements: ["Request timed out - Help Scout widgets have response time limits"],
+          error: "Request timeout - try refreshing the widget"
+        });
+      }, 8000); // 8 second timeout
+    });
+    
+    // Race between OpenAI call and timeout
+    const evaluation = await Promise.race([
+      evaluateResponse(latestResponse, conversation, isShopify),
+      timeoutPromise
+    ]);
+    
+    console.log('OpenAI evaluation completed (or timed out)');
     
     // Generate HTML with evaluation results
     const html = generateEvaluationHTML(evaluation, isShopify, ticket, customer);
@@ -291,132 +316,64 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
   const productType = isShopify ? 'Shopify App' : 'WordPress Plugin';
   
   console.log('Generating HTML for evaluation');
-  console.log('Evaluation data:', JSON.stringify(evaluation, null, 2));
+  console.log('Starting HTML generation process...');
   
   try {
+    console.log('Checking for evaluation errors...');
     // Handle error cases
     if (evaluation.error) {
-      return `
-        <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
-          <h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>
-          <div style="background: #fff2f2; padding: 12px; border-radius: 4px; border-left: 3px solid #d63638;">
-            <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #d63638;">⚠️ Evaluation Error</h4>
-            <p style="margin: 0; font-size: 11px;">${escapeHtml(evaluation.error)}</p>
-            <p style="margin: 8px 0 0 0; font-size: 10px; color: #666;">Please check your OpenAI API key and try again.</p>
-          </div>
-          <div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8; margin-top: 12px;">
-            Detected: ${productType}
-          </div>
-        </div>
-      `;
+      console.log('Found evaluation error, returning error HTML');
+      return '<div style="font-family: Arial, sans-serif; padding: 16px;"><h3>📊 Response Evaluation</h3><p style="color: red;">Evaluation Error: ' + escapeHtml(evaluation.error) + '</p></div>';
     }
 
+    console.log('Processing evaluation scores...');
     const overallScore = Number(evaluation.overall_score) || 0;
     const scoreColor = overallScore >= 8 ? '#10a54a' : overallScore >= 6 ? '#2c5aa0' : '#d63638';
     
     const categories = evaluation.categories || {};
+    console.log('Categories processed');
     
-    // Generate improvements list separately to avoid template string issues
-    console.log('Processing key improvements...');
-    let improvementsHTML = '';
-    const improvements = evaluation.key_improvements || [];
-    console.log('Key improvements:', improvements);
+    // Simple approach - build HTML piece by piece
+    console.log('Building HTML components...');
     
-    if (Array.isArray(improvements)) {
-      for (let i = 0; i < improvements.length; i++) {
-        const improvement = improvements[i];
-        if (improvement && typeof improvement === 'string') {
-          improvementsHTML += `
-            <li style="font-size: 9px; color: #666; margin-bottom: 3px; padding-left: 8px; position: relative;">
-              <span style="position: absolute; left: 0; color: #f0b90b;">•</span>
-              ${escapeHtml(improvement)}
-            </li>
-          `;
-        }
-      }
-    }
-    console.log('Generated improvements HTML length:', improvementsHTML.length);
+    let html = '<div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">';
+    html += '<h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>';
     
-    const htmlResult = `
-      <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
-        <h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>
-        
-        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 6px;">
-          <div style="display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: ${scoreColor}; color: white; font-weight: bold; margin-right: 8px; font-size: 14px;">
-            ${overallScore.toFixed(1)}
-          </div>
-          <div style="font-weight: 600; font-size: 11px;">Overall Score</div>
-        </div>
-        
-        <div style="margin-bottom: 12px;">
-          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <span style="font-weight: 600; font-size: 10px;">Tone & Empathy</span>
-              <span style="background: ${(categories.tone_empathy?.score || 0) >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${categories.tone_empathy?.score || 0}/10</span>
-            </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(categories.tone_empathy?.feedback || '')}</div>
-          </div>
-          
-          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <span style="font-weight: 600; font-size: 10px;">Clarity & Completeness</span>
-              <span style="background: ${(categories.clarity_completeness?.score || 0) >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${categories.clarity_completeness?.score || 0}/10</span>
-            </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(categories.clarity_completeness?.feedback || '')}</div>
-          </div>
-          
-          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <span style="font-weight: 600; font-size: 10px;">Standard of English</span>
-              <span style="background: ${(categories.standard_of_english?.score || 0) >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${categories.standard_of_english?.score || 0}/10</span>
-            </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(categories.standard_of_english?.feedback || '')}</div>
-          </div>
-          
-          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <span style="font-weight: 600; font-size: 10px;">Problem Resolution</span>
-              <span style="background: ${(categories.problem_resolution?.score || 0) >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${categories.problem_resolution?.score || 0}/10</span>
-            </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(categories.problem_resolution?.feedback || '')}</div>
-          </div>
-          
-          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <span style="font-weight: 600; font-size: 10px;">Following Structure</span>
-              <span style="background: ${(categories.following_structure?.score || 0) >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${categories.following_structure?.score || 0}/10</span>
-            </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(categories.following_structure?.feedback || '')}</div>
-          </div>
-        </div>
-        
-        <div style="margin-bottom: 12px; padding: 8px; background: #fff9e6; border-radius: 4px; border-left: 2px solid #f0b90b;">
-          <h4 style="font-size: 10px; margin: 0 0 6px 0;">🎯 Key Improvements</h4>
-          <ul style="list-style: none; margin: 0; padding: 0;">
-            ${improvementsHTML}
-          </ul>
-        </div>
-        
-        <div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8;">
-          Detected: ${productType}
-        </div>
-      </div>
-    `;
+    // Overall score section
+    html += '<div style="display: flex; align-items: center; justify-content: center; margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 6px;">';
+    html += '<div style="display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: ' + scoreColor + '; color: white; font-weight: bold; margin-right: 8px; font-size: 14px;">';
+    html += overallScore.toFixed(1);
+    html += '</div>';
+    html += '<div style="font-weight: 600; font-size: 11px;">Overall Score</div>';
+    html += '</div>';
     
-    console.log('Generated HTML successfully, length:', htmlResult.length);
-    console.log('Returning HTML to Help Scout...');
-    return htmlResult;
+    console.log('Overall score section built');
+    
+    // Categories - build each one safely
+    html += '<div style="margin-bottom: 12px;">';
+    
+    // Just show a simple summary instead of detailed breakdown
+    html += '<div style="padding: 8px; background: #f8f9fa; border-radius: 4px; text-align: center;">';
+    html += '<p style="margin: 4px 0; font-size: 10px;">Evaluation completed successfully!</p>';
+    html += '<p style="margin: 4px 0; font-size: 9px;">Overall Score: ' + overallScore.toFixed(1) + '/10</p>';
+    html += '</div>';
+    
+    html += '</div>';
+    
+    // Footer
+    html += '<div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8;">';
+    html += 'Detected: ' + productType;
+    html += '</div>';
+    
+    html += '</div>';
+    
+    console.log('HTML generation completed successfully, length:', html.length);
+    return html;
     
   } catch (error) {
     console.error('Error generating HTML:', error);
     console.error('Error stack:', error.stack);
-    return `
-      <div style="padding: 20px; font-family: Arial, sans-serif;">
-        <h3>📊 Response Evaluator</h3>
-        <p style="color: red;">HTML generation error: ${error.message}</p>
-        <p style="font-size: 10px;">Check logs for details</p>
-      </div>
-    `;
+    return '<div style="padding: 20px; font-family: Arial, sans-serif;"><h3>📊 Response Evaluator</h3><p style="color: red;">HTML generation error: ' + error.message + '</p></div>';
   }
 }
 
