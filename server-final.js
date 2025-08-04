@@ -73,35 +73,10 @@ app.post('/', async (req, res) => {
     const isShopify = detectShopifyContext(conversation);
     console.log('Is Shopify:', isShopify);
     
-    // Evaluate the response using OpenAI with timeout handling
-    console.log('Starting OpenAI evaluation with timeout...');
-    
-    // Set up a timeout promise
-    const timeoutPromise = new Promise((resolve) => {
-      setTimeout(() => {
-        console.log('OpenAI evaluation timed out');
-        resolve({
-          overall_score: 0,
-          categories: {
-            tone_empathy: { score: 0, feedback: "Evaluation timed out - please try again" },
-            clarity_completeness: { score: 0, feedback: "Evaluation timed out - please try again" },
-            standard_of_english: { score: 0, feedback: "Evaluation timed out - please try again" },
-            problem_resolution: { score: 0, feedback: "Evaluation timed out - please try again" },
-            following_structure: { score: 0, feedback: "Evaluation timed out - please try again" }
-          },
-          key_improvements: ["Request timed out - Help Scout widgets have response time limits"],
-          error: "Request timeout - try refreshing the widget"
-        });
-      }, 8000); // 8 second timeout
-    });
-    
-    // Race between OpenAI call and timeout
-    const evaluation = await Promise.race([
-      evaluateResponse(latestResponse, conversation, isShopify),
-      timeoutPromise
-    ]);
-    
-    console.log('OpenAI evaluation completed (or timed out)');
+    // Evaluate the response using OpenAI
+    console.log('Starting OpenAI evaluation...');
+    const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
+    console.log('OpenAI evaluation completed');
     
     // Generate HTML with evaluation results
     console.log('About to generate simple HTML test...');
