@@ -4,7 +4,7 @@
   "description": "Help Scout widget for evaluating support responses",
   "main": "server-simple.js",
   "scripts": {
-    "start": "node server-simple.js",
+    "start": "node server-debug.js"
     "dev": "node server-simple.js"
   },
   "dependencies": {
