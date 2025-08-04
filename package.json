@@ -2,10 +2,10 @@
     "name": "helpscout-response-evaluator",
     "version": "1.0.0",
     "description": "Help Scout widget for evaluating support responses",
-    "main": "server-debug.js",
+    "main": "server-fixed.js",
     "scripts": {
-      "start": "node server-debug.js",
-      "dev": "node server-debug.js"
+      "start": "node server-fixed.js",
+      "dev": "node server-fixed.js"
     },
     "dependencies": {
       "express": "^4.18.2",
