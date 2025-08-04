@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Response Evaluation</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="response-evaluator">
+        <div class="header">
+            <h3>📊 Response Evaluation</h3>
+        </div>
+        
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Evaluating latest response...</p>
+        </div>
+        
+        <div id="no-response" class="message" style="display: none;">
+            <p>No team response found to evaluate.</p>
+        </div>
+        
+        <div id="evaluation-results" style="display: none;">
+            <div class="overall-score">
+                <div class="score-circle">
+                    <span id="overall-score">-</span>
+                    <small>/10</small>
+                </div>
+                <div class="score-label">Overall Score</div>
+            </div>
+            
+            <div class="categories">
+                <div class="category">
+                    <div class="category-header">
+                        <span class="category-name">Tone & Empathy</span>
+                        <span class="category-score" id="tone-score">-</span>
+                    </div>
+                    <div class="category-feedback" id="tone-feedback"></div>
+                </div>
+                
+                <div class="category">
+                    <div class="category-header">
+                        <span class="category-name">Clarity & Completeness</span>
+                        <span class="category-score" id="clarity-score">-</span>
+                    </div>
+                    <div class="category-feedback" id="clarity-feedback"></div>
+                </div>
+                
+                <div class="category">
+                    <div class="category-header">
+                        <span class="category-name">Standard of English</span>
+                        <span class="category-score" id="english-score">-</span>
+                    </div>
+                    <div class="category-feedback" id="english-feedback"></div>
+                </div>
+                
+                <div class="category">
+                    <div class="category-header">
+                        <span class="category-name">Problem Resolution</span>
+                        <span class="category-score" id="resolution-score">-</span>
+                    </div>
+                    <div class="category-feedback" id="resolution-feedback"></div>
+                </div>
+                
+                <div class="category">
+                    <div class="category-header">
+                        <span class="category-name">Following Structure</span>
+                        <span class="category-score" id="structure-score">-</span>
+                    </div>
+                    <div class="category-feedback" id="structure-feedback"></div>
+                </div>
+            </div>
+            
+            <div class="improvements">
+                <h4>🎯 Key Improvements</h4>
+                <ul id="improvements-list"></ul>
+            </div>
+            
+            <div class="product-type" id="product-type" style="display: none;">
+                <small>Detected: <span id="product-type-text"></span></small>
+            </div>
+        </div>
+        
+        <div id="error" class="error" style="display: none;">
+            <p>Error loading evaluation. Please try refreshing.</p>
+        </div>
+    </div>
+
+    <script src="widget.js"></script>
+</body>
+</html>

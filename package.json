@@ -1,0 +1,19 @@
+{
+  "name": "helpscout-response-evaluator",
+  "version": "1.0.0",
+  "description": "Help Scout widget for evaluating support responses",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
