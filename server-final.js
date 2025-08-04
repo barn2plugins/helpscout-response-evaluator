@@ -6,6 +6,9 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Simple in-memory cache for evaluations
+const evaluationCache = new Map();
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -68,10 +71,51 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Skip all processing and return immediately
-    console.log('Returning immediate response to Help Scout');
+    // Detect if this is about Shopify (app) or WordPress (plugin)
+    const isShopify = detectShopifyContext(conversation);
     
-    const html = '<div><h3>Widget Working</h3><p>Found response from team</p></div>';
+    // Create cache key from response text
+    const cacheKey = `${ticket.id}_${latestResponse.createdAt}`;
+    
+    // Check if we already have results
+    if (evaluationCache.has(cacheKey)) {
+      console.log('Returning cached evaluation results');
+      const evaluation = evaluationCache.get(cacheKey);
+      
+      const html = `
+        <div style="font-family: Arial, sans-serif; padding: 16px;">
+          <h3>📊 Response Evaluation</h3>
+          <p><strong>Score:</strong> ${evaluation.overall_score}/10</p>
+          <p><strong>Product:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
+          <p style="font-size: 10px; color: #666;">Evaluation completed</p>
+        </div>
+      `;
+      
+      return res.json({ html });
+    }
+    
+    // Start OpenAI evaluation in background
+    console.log('Starting background OpenAI evaluation...');
+    
+    evaluateResponse(latestResponse, conversation, isShopify)
+      .then(evaluation => {
+        console.log('Background evaluation completed:', evaluation.overall_score);
+        evaluationCache.set(cacheKey, evaluation);
+      })
+      .catch(error => {
+        console.error('Background evaluation failed:', error.message);
+        evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
+      });
+    
+    // Respond immediately with processing message
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 16px;">
+        <h3>📊 Response Evaluation</h3>
+        <p><strong>Status:</strong> Processing with OpenAI...</p>
+        <p><strong>Product:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
+        <p style="font-size: 10px; color: #666;">Refresh in 15 seconds for results</p>
+      </div>
+    `;
     
     res.json({ html });
 
