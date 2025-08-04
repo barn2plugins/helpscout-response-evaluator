@@ -114,8 +114,10 @@ async function getHelpScoutConversation(conversationId) {
     console.log('Basic API test successful:', testResponse.data.firstName);
     
     console.log('Fetching conversation ID:', conversationId);
-    const apiUrl = `https://api.helpscout.net/v2/conversations/${conversationId}?embed=threads,tags`;
-    console.log('API URL:', apiUrl);
+    
+    // Try without embed parameters first
+    let apiUrl = `https://api.helpscout.net/v2/conversations/${conversationId}`;
+    console.log('API URL (basic):', apiUrl);
     
     const response = await axios.get(apiUrl, {
       headers: {
@@ -123,6 +125,25 @@ async function getHelpScoutConversation(conversationId) {
         'Content-Type': 'application/json'
       }
     });
+    
+    console.log('Basic conversation fetch successful');
+    
+    // If basic works, try with threads
+    apiUrl = `https://api.helpscout.net/v2/conversations/${conversationId}/threads`;
+    console.log('Fetching threads from:', apiUrl);
+    
+    const threadsResponse = await axios.get(apiUrl, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    // Combine the data
+    const conversationData = response.data;
+    conversationData._embedded = { threads: threadsResponse.data._embedded.threads };
+    
+    return conversationData;
     
     return response.data;
   } catch (error) {
