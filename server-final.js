@@ -103,15 +103,16 @@ async function getHelpScoutConversation(conversationId) {
       accessToken = authResponse.data.access_token;
     }
 
-    const response = await axios.get(
-      `https://api.helpscout.net/v2/conversations/${conversationId}?embed=threads,tags`,
-      {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
+    console.log('Fetching conversation ID:', conversationId);
+    const apiUrl = `https://api.helpscout.net/v2/conversations/${conversationId}?embed=threads,tags`;
+    console.log('API URL:', apiUrl);
+    
+    const response = await axios.get(apiUrl, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
       }
-    );
+    });
     
     return response.data;
   } catch (error) {
