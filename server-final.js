@@ -1,4 +1,4 @@
-  const express = require('express');
+const express = require('express');
   const axios = require('axios');
   const cors = require('cors');
   require('dotenv').config();
@@ -63,31 +63,13 @@
       const isShopify = detectShopifyContext(conversation);
       console.log('Is Shopify:', isShopify);
 
-      // For now, skip OpenAI and just show what we found
-      const html = `
-        <div style="padding: 20px; font-family: Arial, sans-serif; max-width: 300px;">
-          <h3 style="color: #2c5aa0; font-size: 14px; margin: 0 0 16px 0;">📊 Response Evaluator</h3>
-          
-          <div style="background: #f0f8f0; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
-            <h4 style="margin: 0 0 8px 0; font-size: 12px;">✅ Team Response Found!</h4>
-            <p style="margin: 4px 0; font-size: 11px;"><strong>Response length:</strong> ${latestResponse.text?.length || 0} characters</p>
-            <p style="margin: 4px 0; font-size: 11px;"><strong>From:</strong> ${latestResponse.createdBy?.first || 'Unknown'} ${latestResponse.createdBy?.last || ''}</p>
-            <p style="margin: 4px 0; font-size: 11px;"><strong>Context:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
-          </div>
-          
-          <div style="background: #f8f9fa; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
-            <h4 style="margin: 0 0 8px 0; font-size: 12px;">Response Preview:</h4>
-            <p style="margin: 0; font-size: 10px; color: #666; line-height: 1.3; max-height: 100px; overflow-y: auto;">
-              ${latestResponse.text?.substring(0, 300)}${latestResponse.text?.length > 300 ? '...' : ''}
-            </p>
-          </div>
-          
-          <div style="background: #fff9e6; padding: 12px; border-radius: 4px; border-left: 3px solid #f0b90b;">
-            <h4 style="margin: 0 0 8px 0; font-size: 12px;">🎯 Next Step</h4>
-            <p style="margin: 0; font-size: 11px;">Response content retrieved successfully. Ready to add OpenAI evaluation!</p>
-          </div>
-        </div>
-      `;
+      // Evaluate the response using OpenAI
+      console.log('Starting OpenAI evaluation...');
+      const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
+      console.log('OpenAI evaluation completed');
+
+      // Generate HTML with evaluation results
+      const html = generateEvaluationHTML(evaluation, isShopify, ticket, customer);
 
       res.json({ html });
 
@@ -238,17 +220,252 @@
     return allText.includes('shopify') || allText.includes('shopify app');
   }
 
+  // Evaluate response using OpenAI
+  async function evaluateResponse(response, conversation, isShopify) {
+    const productType = isShopify ? 'app' : 'plugin';
+
+    // Clean the response text by removing HTML tags
+    const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const prompt = `
+  You are evaluating a customer support response based on these specific guidelines:
+
+  SUPPORT TONE REQUIREMENTS:
+  1. MUST start by thanking the customer
+  2. MUST end with a polite closing (e.g., "Let me know if you have any questions")
+  3. Should suggest workarounds when saying something isn't possible
+  4. Only apologize when the company has done something wrong
+  5. Use positive language (avoid "but" and "however")
+  6. Include relevant links when mentioning features or documentation
+  7. Use "${productType}" not "${isShopify ? 'plugin' : 'app'}" (this is a ${isShopify ? 'Shopify' : 'WordPress'} product)
+  8. Focus on being helpful and reassuring, especially for pre-sales
+
+  RESPONSE TO EVALUATE:
+  "${cleanText}"
+
+  Please evaluate this response on these criteria:
+  1. Tone & Empathy (follows support tone guidelines, thanks customer, polite closing)
+  2. Clarity & Completeness (clear, direct answers, addresses all questions)
+  3. Standard of English (grammar, spelling, natural phrasing for non-native speakers)
+  4. Problem Resolution (addresses actual customer needs, suggests solutions)
+  5. Following Structure (proper greeting, closing, correct terminology)
+
+  For each category, provide:
+  - Score out of 10
+  - Specific feedback (what was good, what needs improvement)
+
+  Then provide an overall score out of 10 and 2-3 key suggestions for improvement.
+
+  Format as JSON with this structure:
+  {
+    "overall_score": 8.5,
+    "categories": {
+      "tone_empathy": {
+        "score": 9,
+        "feedback": "Great empathetic tone, thanked customer at start"
+      },
+      "clarity_completeness": {
+        "score": 8,
+        "feedback": "Clear explanation but could be more concise"
+      },
+      "standard_of_english": {
+        "score": 7,
+        "feedback": "Could use more natural phrasing in some areas"
+      },
+      "problem_resolution": {
+        "score": 8,
+        "feedback": "Addressed the issue but could suggest more alternatives"
+      },
+      "following_structure": {
+        "score": 9,
+        "feedback": "Good structure, used correct terminology"
+      }
+    },
+    "key_improvements": [
+      "Consider suggesting an alternative approach",
+      "Add a link to the relevant documentation",
+      "Use more natural phrasing"
+    ]
+  }`;
+
+    try {
+      // Check if API key exists
+      if (!process.env.OPENAI_API_KEY) {
+        console.error('OpenAI API key is not set!');
+        throw new Error('OpenAI API key is missing');
+      }
+
+      console.log('OpenAI API key exists:', !!process.env.OPENAI_API_KEY);
+      console.log('Making OpenAI API call...');
+
+      const apiResponse = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: 'gpt-4',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert at evaluating customer support responses. Always respond with valid JSON only, no other text.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 1500
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      console.log('OpenAI API call successful');
+      const content = apiResponse.data.choices[0].message.content;
+      console.log('Parsing response...');
+      return JSON.parse(content);
+    } catch (error) {
+      console.error('=== OpenAI API Error Details ===');
+      if (error.response) {
+        console.error('Status:', error.response.status);
+        console.error('Status Text:', error.response.statusText);
+        console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+      } else {
+        console.error('Error message:', error.message);
+      }
+      console.error('=== End Error Details ===');
+
+      // Return a fallback evaluation if OpenAI fails
+      return {
+        overall_score: 0,
+        categories: {
+          tone_empathy: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+          clarity_completeness: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+          standard_of_english: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+          problem_resolution: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+          following_structure: { score: 0, feedback: "Unable to evaluate - OpenAI API error" }
+        },
+        key_improvements: ["OpenAI API error occurred - check logs for details"],
+        error: error.response?.data?.error?.message || error.message
+      };
+    }
+  }
+
+  // Generate HTML for Help Scout sidebar
+  function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
+    const productType = isShopify ? 'Shopify App' : 'WordPress Plugin';
+
+    // Handle error cases
+    if (evaluation.error) {
+      return `
+        <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
+          <h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+          
+          <div style="background: #fff2f2; padding: 12px; border-radius: 4px; border-left: 3px solid #d63638;">
+            <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #d63638;">⚠️ Evaluation Error</h4>
+            <p style="margin: 0; font-size: 11px;">${evaluation.error}</p>
+            <p style="margin: 8px 0 0 0; font-size: 10px; color: #666;">Please check your OpenAI API key and try again.</p>
+          </div>
+          
+          <div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8; margin-top: 12px;">
+            Detected: ${productType}
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
+        <h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+        
+        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 6px;">
+          <div style="display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: ${evaluation.overall_score >= 8 ? '#10a54a' : 
+  evaluation.overall_score >= 6 ? '#2c5aa0' : '#d63638'}; color: white; font-weight: bold; margin-right: 8px; font-size: 14px;">
+            ${evaluation.overall_score.toFixed(1)}
+          </div>
+          <div style="font-weight: 600; font-size: 11px;">Overall Score</div>
+        </div>
+        
+        <div style="margin-bottom: 12px;">
+          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 600; font-size: 10px;">Tone & Empathy</span>
+              <span style="background: ${evaluation.categories.tone_empathy.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 
+  9px;">${evaluation.categories.tone_empathy.score}/10</span>
+            </div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.tone_empathy.feedback}</div>
+          </div>
+          
+          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 600; font-size: 10px;">Clarity & Completeness</span>
+              <span style="background: ${evaluation.categories.clarity_completeness.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 
+  9px;">${evaluation.categories.clarity_completeness.score}/10</span>
+            </div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.clarity_completeness.feedback}</div>
+          </div>
+          
+          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 600; font-size: 10px;">Standard of English</span>
+              <span style="background: ${evaluation.categories.standard_of_english.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 
+  9px;">${evaluation.categories.standard_of_english.score}/10</span>
+            </div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.standard_of_english.feedback}</div>
+          </div>
+          
+          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 600; font-size: 10px;">Problem Resolution</span>
+              <span style="background: ${evaluation.categories.problem_resolution.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 
+  9px;">${evaluation.categories.problem_resolution.score}/10</span>
+            </div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.problem_resolution.feedback}</div>
+          </div>
+          
+          <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 600; font-size: 10px;">Following Structure</span>
+              <span style="background: ${evaluation.categories.following_structure.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 
+  9px;">${evaluation.categories.following_structure.score}/10</span>
+            </div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.following_structure.feedback}</div>
+          </div>
+        </div>
+        
+        <div style="margin-bottom: 12px; padding: 8px; background: #fff9e6; border-radius: 4px; border-left: 2px solid #f0b90b;">
+          <h4 style="font-size: 10px; margin: 0 0 6px 0;">🎯 Key Improvements</h4>
+          <ul style="list-style: none; margin: 0; padding: 0;">
+            ${evaluation.key_improvements.map(improvement => `
+              <li style="font-size: 9px; color: #666; margin-bottom: 3px; padding-left: 8px; position: relative;">
+                <span style="position: absolute; left: 0; color: #f0b90b;">•</span>
+                ${improvement}
+              </li>
+            `).join('')}
+          </ul>
+        </div>
+        
+        <div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8;">
+          Detected: ${productType}
+        </div>
+      </div>
+    `;
+  }
+
   // Test endpoint
   app.get('/widget', (req, res) => {
     res.send(`
       <div style="padding: 20px; font-family: Arial, sans-serif;">
         <h3>📊 Response Evaluator</h3>
-        <p>Testing response content retrieval! Help Scout calls POST /</p>
+        <p>Full OpenAI evaluation server! Help Scout calls POST /</p>
         <p>Time: ${new Date().toISOString()}</p>
       </div>
     `);
   });
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Response content test server running on 0.0.0.0:${PORT}`);
+    console.log(`Full OpenAI evaluation server running on 0.0.0.0:${PORT}`);
   });
