@@ -81,6 +81,9 @@ app.post('/', async (req, res) => {
     // Generate HTML with evaluation results
     const html = generateEvaluationHTML(evaluation, isShopify, ticket, customer);
     
+    console.log('About to send response to Help Scout');
+    console.log('Response structure:', { html: html ? 'HTML_PRESENT' : 'HTML_MISSING', length: html?.length || 0 });
+    
     res.json({ html });
 
   } catch (error) {
@@ -288,6 +291,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
   const productType = isShopify ? 'Shopify App' : 'WordPress Plugin';
   
   console.log('Generating HTML for evaluation');
+  console.log('Evaluation data:', JSON.stringify(evaluation, null, 2));
   
   try {
     // Handle error cases
@@ -312,7 +316,28 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
     
     const categories = evaluation.categories || {};
     
-    return `
+    // Generate improvements list separately to avoid template string issues
+    console.log('Processing key improvements...');
+    let improvementsHTML = '';
+    const improvements = evaluation.key_improvements || [];
+    console.log('Key improvements:', improvements);
+    
+    if (Array.isArray(improvements)) {
+      for (let i = 0; i < improvements.length; i++) {
+        const improvement = improvements[i];
+        if (improvement && typeof improvement === 'string') {
+          improvementsHTML += `
+            <li style="font-size: 9px; color: #666; margin-bottom: 3px; padding-left: 8px; position: relative;">
+              <span style="position: absolute; left: 0; color: #f0b90b;">•</span>
+              ${escapeHtml(improvement)}
+            </li>
+          `;
+        }
+      }
+    }
+    console.log('Generated improvements HTML length:', improvementsHTML.length);
+    
+    const htmlResult = `
       <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
         <h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>
         
@@ -368,12 +393,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
         <div style="margin-bottom: 12px; padding: 8px; background: #fff9e6; border-radius: 4px; border-left: 2px solid #f0b90b;">
           <h4 style="font-size: 10px; margin: 0 0 6px 0;">🎯 Key Improvements</h4>
           <ul style="list-style: none; margin: 0; padding: 0;">
-            ${(evaluation.key_improvements || []).map(improvement => `
-              <li style="font-size: 9px; color: #666; margin-bottom: 3px; padding-left: 8px; position: relative;">
-                <span style="position: absolute; left: 0; color: #f0b90b;">•</span>
-                ${escapeHtml(improvement)}
-              </li>
-            `).join('')}
+            ${improvementsHTML}
           </ul>
         </div>
         
@@ -383,12 +403,18 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
       </div>
     `;
     
+    console.log('Generated HTML successfully, length:', htmlResult.length);
+    console.log('Returning HTML to Help Scout...');
+    return htmlResult;
+    
   } catch (error) {
     console.error('Error generating HTML:', error);
+    console.error('Error stack:', error.stack);
     return `
       <div style="padding: 20px; font-family: Arial, sans-serif;">
         <h3>📊 Response Evaluator</h3>
         <p style="color: red;">HTML generation error: ${error.message}</p>
+        <p style="font-size: 10px;">Check logs for details</p>
       </div>
     `;
   }
