@@ -353,6 +353,17 @@ Format as JSON with this structure:
   }
 }
 
+// Helper function to escape HTML content
+function escapeHtml(text) {
+  if (!text) return '';
+  return text.toString()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Generate HTML for Help Scout sidebar
 function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
   const productType = isShopify ? 'Shopify App' : 'WordPress Plugin';
@@ -369,7 +380,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
           
           <div style="background: #fff2f2; padding: 12px; border-radius: 4px; border-left: 3px solid #d63638;">
             <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #d63638;">⚠️ Evaluation Error</h4>
-            <p style="margin: 0; font-size: 11px;">${evaluation.error}</p>
+            <p style="margin: 0; font-size: 11px;">${escapeHtml(evaluation.error)}</p>
             <p style="margin: 8px 0 0 0; font-size: 10px; color: #666;">Please check your OpenAI API key and try again.</p>
           </div>
           
@@ -405,7 +416,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
               <span style="font-weight: 600; font-size: 10px;">Tone & Empathy</span>
               <span style="background: ${evaluation.categories.tone_empathy.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${evaluation.categories.tone_empathy.score}/10</span>
             </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.tone_empathy.feedback}</div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(evaluation.categories.tone_empathy.feedback)}</div>
           </div>
           
           <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
@@ -413,7 +424,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
               <span style="font-weight: 600; font-size: 10px;">Clarity & Completeness</span>
               <span style="background: ${evaluation.categories.clarity_completeness.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${evaluation.categories.clarity_completeness.score}/10</span>
             </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.clarity_completeness.feedback}</div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(evaluation.categories.clarity_completeness.feedback)}</div>
           </div>
           
           <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
@@ -421,7 +432,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
               <span style="font-weight: 600; font-size: 10px;">Standard of English</span>
               <span style="background: ${evaluation.categories.standard_of_english.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${evaluation.categories.standard_of_english.score}/10</span>
             </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.standard_of_english.feedback}</div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(evaluation.categories.standard_of_english.feedback)}</div>
           </div>
           
           <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
@@ -429,7 +440,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
               <span style="font-weight: 600; font-size: 10px;">Problem Resolution</span>
               <span style="background: ${evaluation.categories.problem_resolution.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${evaluation.categories.problem_resolution.score}/10</span>
             </div>
-            <div style="font-size: 9px; color: #666; line-height: 1.2;">${evaluation.categories.problem_resolution.feedback}</div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(evaluation.categories.problem_resolution.feedback)}</div>
           </div>
           
           <div style="margin-bottom: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; border-left: 2px solid #2c5aa0;">
@@ -437,7 +448,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
               <span style="font-weight: 600; font-size: 10px;">Following Structure</span>
               <span style="background: ${evaluation.categories.following_structure.score >= 8 ? '#10a54a' : '#2c5aa0'}; color: white; padding: 1px 4px; border-radius: 8px; font-size: 9px;">${evaluation.categories.following_structure.score}/10</span>
             </div>
-            <div style="font-size: 9px; color; #666; line-height: 1.2;">${evaluation.categories.following_structure.feedback}</div>
+            <div style="font-size: 9px; color: #666; line-height: 1.2;">${escapeHtml(evaluation.categories.following_structure.feedback)}</div>
           </div>
         </div>
         
@@ -447,7 +458,7 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
             ${evaluation.key_improvements.map(improvement => `
               <li style="font-size: 9px; color: #666; margin-bottom: 3px; padding-left: 8px; position: relative;">
                 <span style="position: absolute; left: 0; color: #f0b90b;">•</span>
-                ${improvement}
+                ${escapeHtml(improvement)}
               </li>
             `).join('')}
           </ul>
