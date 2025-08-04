@@ -104,10 +104,19 @@ app.post('/', async (req, res) => {
     console.log('OpenAI evaluation completed (or timed out)');
     
     // Generate HTML with evaluation results
-    const html = generateEvaluationHTML(evaluation, isShopify, ticket, customer);
+    console.log('About to generate simple HTML test...');
     
+    const html = `
+      <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <h3>📊 Response Evaluation</h3>
+        <p><strong>Score:</strong> ${evaluation.overall_score || 0}/10</p>
+        <p><strong>Status:</strong> Evaluation completed</p>
+        <p><strong>Product:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
+      </div>
+    `;
+    
+    console.log('Simple HTML generated, length:', html.length);
     console.log('About to send response to Help Scout');
-    console.log('Response structure:', { html: html ? 'HTML_PRESENT' : 'HTML_MISSING', length: html?.length || 0 });
     
     res.json({ html });
 
