@@ -92,8 +92,12 @@ app.post('/', async (req, res) => {
     
     console.log('Simple HTML generated, length:', html.length);
     console.log('About to send response to Help Scout');
+    console.log('HTML preview:', html.substring(0, 100) + '...');
     
-    res.json({ html });
+    const response = { html };
+    console.log('Response object:', JSON.stringify(response).substring(0, 200) + '...');
+    
+    res.json(response);
 
   } catch (error) {
     console.error('Error:', error);
