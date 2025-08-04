@@ -39,9 +39,11 @@ app.post('/', async (req, res) => {
     }
 
     // Find the latest team response
+    console.log('Looking for latest team response...');
     const latestResponse = findLatestTeamResponse(conversation);
     
     if (!latestResponse) {
+      console.log('No team response found');
       return res.json({
         html: `
           <div style="padding: 20px; font-family: Arial, sans-serif;">
@@ -53,11 +55,17 @@ app.post('/', async (req, res) => {
       });
     }
 
+    console.log('Found team response, length:', latestResponse.text?.length || 0);
+
     // Detect if this is about Shopify (app) or WordPress (plugin)
+    console.log('Detecting Shopify context...');
     const isShopify = detectShopifyContext(conversation);
+    console.log('Is Shopify:', isShopify);
     
     // Evaluate the response using OpenAI
+    console.log('Starting OpenAI evaluation...');
     const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
+    console.log('OpenAI evaluation completed');
     
     // Generate HTML with evaluation results
     const html = generateEvaluationHTML(evaluation, isShopify, ticket, customer);
