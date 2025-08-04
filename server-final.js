@@ -68,23 +68,10 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Detect if this is about Shopify (app) or WordPress (plugin)
-    console.log('Detecting Shopify context...');
-    const isShopify = detectShopifyContext(conversation);
-    console.log('Is Shopify:', isShopify);
+    // Skip all processing and return immediately
+    console.log('Returning immediate response to Help Scout');
     
-    // Evaluate the response using OpenAI
-    console.log('Starting OpenAI evaluation...');
-    const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
-    console.log('OpenAI evaluation completed');
-    
-    // Generate HTML with evaluation results
-    console.log('About to generate simple HTML test...');
-    
-    const html = '<div><h3>Test Widget</h3><p>Basic test</p></div>';
-    
-    console.log('Simple HTML generated, length:', html.length);
-    console.log('About to send response to Help Scout');
+    const html = '<div><h3>Widget Working</h3><p>Found response from team</p></div>';
     
     res.json({ html });
 
