@@ -85,11 +85,21 @@ async function getHelpScoutConversation(conversationId) {
     
     if (!accessToken) {
       // If no access token, try to get one using App ID/Secret
+      console.log('Attempting to get OAuth token...');
+      console.log('App ID exists:', !!process.env.HELPSCOUT_APP_ID);
+      console.log('App Secret exists:', !!process.env.HELPSCOUT_APP_SECRET);
+      
       const authResponse = await axios.post('https://api.helpscout.net/v2/oauth2/token', {
         grant_type: 'client_credentials',
         client_id: process.env.HELPSCOUT_APP_ID,
         client_secret: process.env.HELPSCOUT_APP_SECRET
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
+      
+      console.log('OAuth token response:', authResponse.data);
       accessToken = authResponse.data.access_token;
     }
 
