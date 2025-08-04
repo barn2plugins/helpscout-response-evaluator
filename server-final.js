@@ -186,7 +186,7 @@ function findLatestTeamResponse(conversation) {
   );
 
   for (const thread of threads) {
-    if (thread.type === 'message' && thread.createdBy === 'user' && thread.body) {
+    if (thread.type === 'message' && thread.createdBy?.type === 'user' && thread.body) {
       return {
         text: thread.body,
         createdAt: thread.createdAt,
