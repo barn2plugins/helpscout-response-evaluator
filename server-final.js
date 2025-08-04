@@ -81,23 +81,12 @@ app.post('/', async (req, res) => {
     // Generate HTML with evaluation results
     console.log('About to generate simple HTML test...');
     
-    const html = `
-      <div style="padding: 20px; font-family: Arial, sans-serif;">
-        <h3>📊 Response Evaluation</h3>
-        <p><strong>Score:</strong> ${evaluation.overall_score || 0}/10</p>
-        <p><strong>Status:</strong> Evaluation completed</p>
-        <p><strong>Product:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
-      </div>
-    `;
+    const html = '<div><h3>Test Widget</h3><p>Basic test</p></div>';
     
     console.log('Simple HTML generated, length:', html.length);
     console.log('About to send response to Help Scout');
-    console.log('HTML preview:', html.substring(0, 100) + '...');
     
-    const response = { html };
-    console.log('Response object:', JSON.stringify(response).substring(0, 200) + '...');
-    
-    res.json(response);
+    res.json({ html });
 
   } catch (error) {
     console.error('Error:', error);
