@@ -147,7 +147,8 @@ async function getHelpScoutConversation(conversationId) {
       threadsResponse.data._embedded.threads.forEach((thread, index) => {
         console.log(`Thread ${index}:`, {
           type: thread.type,
-          createdBy: thread.createdBy?.type,
+          createdBy: thread.createdBy?.type || thread.createdBy,
+          createdByFull: thread.createdBy,
           hasBody: !!thread.body
         });
       });
