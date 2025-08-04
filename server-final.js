@@ -283,7 +283,16 @@ Format as JSON with this structure:
 }`;
 
   try {
-    const response = await axios.post(
+    // Check if API key exists
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('OpenAI API key is not set!');
+      throw new Error('OpenAI API key is missing');
+    }
+
+    console.log('OpenAI API key exists:', !!process.env.OPENAI_API_KEY);
+    console.log('Making OpenAI API call...');
+    
+    const apiResponse = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
         model: 'gpt-4',
@@ -308,17 +317,64 @@ Format as JSON with this structure:
       }
     );
 
-    const content = response.data.choices[0].message.content;
+    console.log('OpenAI API call successful');
+    const content = apiResponse.data.choices[0].message.content;
+    console.log('Parsing response...');
     return JSON.parse(content);
   } catch (error) {
-    console.error('OpenAI API error:', error.response?.data || error.message);
-    throw new Error('Failed to evaluate response with AI');
+    console.error('=== OpenAI API Error Details ===');
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Status Text:', error.response.statusText);
+      console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+      console.error('Headers:', error.response.headers);
+    } else if (error.request) {
+      console.error('No response received');
+      console.error('Request:', error.request);
+    } else {
+      console.error('Error message:', error.message);
+    }
+    console.error('Full error:', error);
+    console.error('=== End Error Details ===');
+    
+    // Return a fallback evaluation if OpenAI fails
+    return {
+      overall_score: 0,
+      categories: {
+        tone_empathy: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+        clarity_completeness: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+        standard_of_english: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+        problem_resolution: { score: 0, feedback: "Unable to evaluate - OpenAI API error" },
+        following_structure: { score: 0, feedback: "Unable to evaluate - OpenAI API error" }
+      },
+      key_improvements: ["OpenAI API error occurred - check logs for details"],
+      error: error.response?.data?.error?.message || error.message
+    };
   }
 }
 
 // Generate HTML for Help Scout sidebar
 function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
   const productType = isShopify ? 'Shopify App' : 'WordPress Plugin';
+  
+  // Handle error cases
+  if (evaluation.error) {
+    return `
+      <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
+        <h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+        
+        <div style="background: #fff2f2; padding: 12px; border-radius: 4px; border-left: 3px solid #d63638;">
+          <h4 style="margin: 0 0 8px 0; font-size: 12px; color: #d63638;">⚠️ Evaluation Error</h4>
+          <p style="margin: 0; font-size: 11px;">${evaluation.error}</p>
+          <p style="margin: 8px 0 0 0; font-size: 10px; color: #666;">Please check your OpenAI API key and try again.</p>
+        </div>
+        
+        <div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8; margin-top: 12px;">
+          Detected: ${productType}
+        </div>
+      </div>
+    `;
+  }
   
   return `
     <div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">
