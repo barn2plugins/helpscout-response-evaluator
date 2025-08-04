@@ -139,9 +139,23 @@ async function getHelpScoutConversation(conversationId) {
       }
     });
     
+    console.log('Threads fetch successful');
+    console.log('Number of threads:', threadsResponse.data._embedded?.threads?.length || 0);
+    
+    // Log thread details
+    if (threadsResponse.data._embedded?.threads) {
+      threadsResponse.data._embedded.threads.forEach((thread, index) => {
+        console.log(`Thread ${index}:`, {
+          type: thread.type,
+          createdBy: thread.createdBy?.type,
+          hasBody: !!thread.body
+        });
+      });
+    }
+    
     // Combine the data
     const conversationData = response.data;
-    conversationData._embedded = { threads: threadsResponse.data._embedded.threads };
+    conversationData._embedded = { threads: threadsResponse.data._embedded?.threads || [] };
     
     return conversationData;
     
