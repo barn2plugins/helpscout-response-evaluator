@@ -48,17 +48,20 @@ app.post('/', async (req, res) => {
     }, null, 2));
 
     // Check if this is a live chat - don't show widget for chats
+    // Help Scout generates subjects like "Live chat on Aug 5" for chat conversations
     const isChatConversation = 
       ticket.type === 'chat' || 
       ticket.source?.type === 'chat' || 
       ticket.source?.type === 'beacon' ||
       (typeof ticket.type === 'string' && ticket.type.toLowerCase() === 'chat') ||
-      (typeof ticket.source?.type === 'string' && ['chat', 'beacon'].includes(ticket.source.type.toLowerCase()));
+      (typeof ticket.source?.type === 'string' && ['chat', 'beacon'].includes(ticket.source.type.toLowerCase())) ||
+      (ticket.subject && ticket.subject.startsWith('Live chat on '));
 
     if (isChatConversation) {
       console.log('Skipping evaluation for live chat conversation', { 
         ticketType: ticket.type, 
-        sourceType: ticket.source?.type 
+        sourceType: ticket.source?.type,
+        subject: ticket.subject
       });
       return res.json({
         html: ''  // Return empty HTML to hide widget
