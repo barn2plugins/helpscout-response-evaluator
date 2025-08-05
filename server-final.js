@@ -125,6 +125,9 @@ app.post('/', async (req, res) => {
           </div>
           ${categoriesHTML}
           ${improvementsHTML}
+          <div style="text-align: center; margin-top: 12px; padding: 8px; background: #f9f9f9; border-radius: 4px; font-size: 10px; color: #666;">
+            💡 Refresh again to see detailed recommendations
+          </div>
         </div>
       `;
       
@@ -360,67 +363,59 @@ Format as JSON with this structure:
 
 // Generate HTML for Help Scout sidebar
 function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
-  const productType = isShopify ? 'Shopify App' : 'WordPress Plugin';
-  
-  console.log('Generating HTML for evaluation');
-  console.log('Starting HTML generation process...');
-  
   try {
-    console.log('Checking for evaluation errors...');
     // Handle error cases
     if (evaluation.error) {
-      console.log('Found evaluation error, returning error HTML');
-      return '<div style="font-family: Arial, sans-serif; padding: 16px;"><h3>📊 Response Evaluation</h3><p style="color: red;">Evaluation Error: ' + escapeHtml(evaluation.error) + '</p></div>';
+      return `
+        <div style="font-family: Arial, sans-serif; padding: 16px;">
+          <h3>📊 Response Evaluation</h3>
+          <p style="color: red;">Evaluation Error: ${escapeHtml(evaluation.error)}</p>
+        </div>
+      `;
     }
 
-    console.log('Processing evaluation scores...');
-    const overallScore = Number(evaluation.overall_score) || 0;
-    const scoreColor = overallScore >= 8 ? '#10a54a' : overallScore >= 6 ? '#2c5aa0' : '#d63638';
+    // Build detailed results HTML (same format as cached results)
+    let categoriesHTML = '';
+    if (evaluation.categories) {
+      const cats = evaluation.categories;
+      if (cats.tone_empathy) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Tone & Empathy:</strong> ${cats.tone_empathy.score}/10 - ${cats.tone_empathy.feedback}</p>`;
+      if (cats.clarity_completeness) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Clarity:</strong> ${cats.clarity_completeness.score}/10 - ${cats.clarity_completeness.feedback}</p>`;
+      if (cats.standard_of_english) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>English:</strong> ${cats.standard_of_english.score}/10 - ${cats.standard_of_english.feedback}</p>`;
+      if (cats.problem_resolution) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Problem Resolution:</strong> ${cats.problem_resolution.score}/10 - ${cats.problem_resolution.feedback}</p>`;
+    }
     
-    const categories = evaluation.categories || {};
-    console.log('Categories processed');
+    let improvementsHTML = '';
+    if (evaluation.key_improvements && evaluation.key_improvements.length > 0) {
+      improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements: </strong><ul style="margin: 4px 0; padding-left: 16px;">';
+      evaluation.key_improvements.forEach(improvement => {
+        improvementsHTML += `<li style="font-size: 10px; margin: 2px 0;">${improvement}</li>`;
+      });
+      improvementsHTML += '</ul></div>';
+    } else {
+      improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #f0f8f0; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements: </strong><span style="font-size: 10px;">No recommendations - excellent response!</span></div>';
+    }
     
-    // Simple approach - build HTML piece by piece
-    console.log('Building HTML components...');
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 16px; max-width: 350px;">
+        <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+        <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
+          <strong style="font-size: 16px;">Overall Score: ${evaluation.overall_score}/10</strong>
+        </div>
+        ${categoriesHTML}
+        ${improvementsHTML}
+      </div>
+    `;
     
-    let html = '<div style="font-family: Arial, sans-serif; font-size: 11px; padding: 16px; max-width: 300px;">';
-    html += '<h3 style="color: #2c5aa0; font-size: 13px; margin: 0 0 12px 0;">📊 Response Evaluation</h3>';
-    
-    // Overall score section
-    html += '<div style="display: flex; align-items: center; justify-content: center; margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 6px;">';
-    html += '<div style="display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: ' + scoreColor + '; color: white; font-weight: bold; margin-right: 8px; font-size: 14px;">';
-    html += overallScore.toFixed(1);
-    html += '</div>';
-    html += '<div style="font-weight: 600; font-size: 11px;">Overall Score</div>';
-    html += '</div>';
-    
-    console.log('Overall score section built');
-    
-    // Categories - build each one safely
-    html += '<div style="margin-bottom: 12px;">';
-    
-    // Just show a simple summary instead of detailed breakdown
-    html += '<div style="padding: 8px; background: #f8f9fa; border-radius: 4px; text-align: center;">';
-    html += '<p style="margin: 4px 0; font-size: 10px;">Evaluation completed successfully!</p>';
-    html += '<p style="margin: 4px 0; font-size: 9px;">Overall Score: ' + overallScore.toFixed(1) + '/10</p>';
-    html += '</div>';
-    
-    html += '</div>';
-    
-    // Footer
-    html += '<div style="text-align: center; color: #999; font-size: 9px; padding-top: 8px; border-top: 1px solid #e8e8e8;">';
-    html += 'Detected: ' + productType;
-    html += '</div>';
-    
-    html += '</div>';
-    
-    console.log('HTML generation completed successfully, length:', html.length);
     return html;
     
   } catch (error) {
     console.error('Error generating HTML:', error);
-    console.error('Error stack:', error.stack);
-    return '<div style="padding: 20px; font-family: Arial, sans-serif;"><h3>📊 Response Evaluator</h3><p style="color: red;">HTML generation error: ' + error.message + '</p></div>';
+    return `
+      <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <h3>📊 Response Evaluator</h3>
+        <p style="color: red;">HTML generation error: ${error.message}</p>
+      </div>
+    `;
   }
 }
 
