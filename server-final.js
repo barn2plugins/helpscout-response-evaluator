@@ -115,56 +115,77 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
-    // Try waiting for OpenAI evaluation (test Help Scout timeout limit)
-    console.log('Starting OpenAI evaluation and waiting...');
+    // Start OpenAI evaluation in background, respond immediately with auto-refresh
+    console.log('Starting background OpenAI evaluation...');
     
-    try {
-      const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
-      console.log('OpenAI evaluation completed:', evaluation.overall_score);
-      evaluationCache.set(cacheKey, evaluation);
-      
-      // Build detailed results HTML (same as cached version)
-      let categoriesHTML = '';
-      if (evaluation.categories) {
-        const cats = evaluation.categories;
-        if (cats.tone_empathy) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Tone & Empathy:</strong> ${cats.tone_empathy.score}/10 - ${cats.tone_empathy.feedback}</p>`;
-        if (cats.clarity_completeness) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Clarity:</strong> ${cats.clarity_completeness.score}/10 - ${cats.clarity_completeness.feedback}</p>`;
-        if (cats.standard_of_english) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>English:</strong> ${cats.standard_of_english.score}/10 - ${cats.standard_of_english.feedback}</p>`;
-        if (cats.problem_resolution) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Problem Resolution:</strong> ${cats.problem_resolution.score}/10 - ${cats.problem_resolution.feedback}</p>`;
-      }
-      
-      let improvementsHTML = '';
-      if (evaluation.key_improvements && evaluation.key_improvements.length > 0) {
-        improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements:</strong>';
-        evaluation.key_improvements.forEach(improvement => {
-          improvementsHTML += `<li style="font-size: 10px; margin: 2px 0;">${improvement}</li>`;
-        });
-        improvementsHTML += '</div>';
-      }
-      
-      const html = `
-        <div style="font-family: Arial, sans-serif; padding: 16px; max-width: 350px;">
-          <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
-          <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
-            <strong style="font-size: 16px;">Overall Score: ${evaluation.overall_score}/10</strong>
+    evaluateResponse(latestResponse, conversation, isShopify)
+      .then(evaluation => {
+        console.log('Background evaluation completed:', evaluation.overall_score);
+        evaluationCache.set(cacheKey, evaluation);
+      })
+      .catch(error => {
+        console.error('Background evaluation failed:', error.message);
+        evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
+      });
+    
+    // Return processing message with auto-refresh JavaScript
+    const html = `
+      <div style="font-family: Arial, sans-serif; padding: 16px;" id="evaluation-widget">
+        <h3>📊 Response Evaluation</h3>
+        <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
+          <p style="margin: 4px 0;"><strong>Status:</strong> <span id="status">Evaluating with OpenAI...</span></p>
+          <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 6px; margin: 8px 0;">
+            <div id="progress" style="width: 0%; background: #2c5aa0; height: 6px; border-radius: 10px; transition: width 0.3s;"></div>
           </div>
-          ${categoriesHTML}
-          ${improvementsHTML}
+          <p style="font-size: 10px; color: #666; margin: 4px 0;" id="timer">Checking for results...</p>
         </div>
-      `;
+      </div>
       
-      res.json({ html });
-      
-    } catch (error) {
-      console.error('OpenAI evaluation failed:', error.message);
-      const html = `
-        <div style="font-family: Arial, sans-serif; padding: 16px;">
-          <h3>📊 Response Evaluation</h3>
-          <p style="color: red;">Evaluation failed: ${error.message}</p>
-        </div>
-      `;
-      res.json({ html });
-    }
+      <script>
+        let checkCount = 0;
+        const maxChecks = 10;
+        
+        function updateProgress() {
+          const progress = Math.min((checkCount / maxChecks) * 100, 95);
+          document.getElementById('progress').style.width = progress + '%';
+        }
+        
+        function checkForResults() {
+          checkCount++;
+          updateProgress();
+          
+          document.getElementById('timer').textContent = 'Checking... (' + checkCount + '/' + maxChecks + ')';
+          
+          fetch(window.location.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(${JSON.stringify(req.body)})
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.html && !data.html.includes('Evaluating with OpenAI')) {
+              document.getElementById('evaluation-widget').innerHTML = data.html;
+            } else if (checkCount < maxChecks) {
+              setTimeout(checkForResults, 3000);
+            } else {
+              document.getElementById('status').textContent = 'Evaluation timeout - please refresh page';
+              document.getElementById('progress').style.background = '#d63638';
+            }
+          })
+          .catch(error => {
+            console.error('Check failed:', error);
+            if (checkCount < maxChecks) {
+              setTimeout(checkForResults, 3000);
+            }
+          });
+        }
+        
+        // Start checking after 5 seconds
+        setTimeout(checkForResults, 5000);
+      </script>
+    `;
+    
+    res.json({ html });
 
   } catch (error) {
     console.error('Error:', error);
