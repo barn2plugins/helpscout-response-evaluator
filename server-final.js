@@ -82,12 +82,33 @@ app.post('/', async (req, res) => {
       console.log('Returning cached evaluation results');
       const evaluation = evaluationCache.get(cacheKey);
       
+      // Build detailed results HTML
+      let categoriesHTML = '';
+      if (evaluation.categories) {
+        const cats = evaluation.categories;
+        if (cats.tone_empathy) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Tone & Empathy:</strong> ${cats.tone_empathy.score}/10 - ${cats.tone_empathy.feedback}</p>`;
+        if (cats.clarity_completeness) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Clarity:</strong> ${cats.clarity_completeness.score}/10 - ${cats.clarity_completeness.feedback}</p>`;
+        if (cats.standard_of_english) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>English:</strong> ${cats.standard_of_english.score}/10 - ${cats.standard_of_english.feedback}</p>`;
+        if (cats.problem_resolution) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Problem Resolution:</strong> ${cats.problem_resolution.score}/10 - ${cats.problem_resolution.feedback}</p>`;
+      }
+      
+      let improvementsHTML = '';
+      if (evaluation.key_improvements && evaluation.key_improvements.length > 0) {
+        improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements:</strong>';
+        evaluation.key_improvements.forEach(improvement => {
+          improvementsHTML += `<li style="font-size: 10px; margin: 2px 0;">${improvement}</li>`;
+        });
+        improvementsHTML += '</div>';
+      }
+      
       const html = `
-        <div style="font-family: Arial, sans-serif; padding: 16px;">
-          <h3>📊 Response Evaluation</h3>
-          <p><strong>Score:</strong> ${evaluation.overall_score}/10</p>
-          <p><strong>Product:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
-          <p style="font-size: 10px; color: #666;">Evaluation completed</p>
+        <div style="font-family: Arial, sans-serif; padding: 16px; max-width: 350px;">
+          <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+          <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
+            <strong style="font-size: 16px;">Overall Score: ${evaluation.overall_score}/10</strong>
+          </div>
+          ${categoriesHTML}
+          ${improvementsHTML}
         </div>
       `;
       
@@ -111,9 +132,10 @@ app.post('/', async (req, res) => {
     const html = `
       <div style="font-family: Arial, sans-serif; padding: 16px;">
         <h3>📊 Response Evaluation</h3>
-        <p><strong>Status:</strong> Processing with OpenAI...</p>
-        <p><strong>Product:</strong> ${isShopify ? 'Shopify App' : 'WordPress Plugin'}</p>
-        <p style="font-size: 10px; color: #666;">Refresh in 15 seconds for results</p>
+        <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
+          <p style="margin: 4px 0;"><strong>Status:</strong> Evaluating with OpenAI...</p>
+          <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh in 15 seconds for detailed results</p>
+        </div>
       </div>
     `;
     
