@@ -131,46 +131,31 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
-    // Start OpenAI evaluation in background
-    console.log('Starting background OpenAI evaluation...');
+    // Wait for OpenAI evaluation to complete before responding
+    console.log('Starting OpenAI evaluation (waiting for completion)...');
     
-    evaluateResponse(latestResponse, conversation)
-      .then(evaluation => {
-        console.log('Background evaluation completed:', evaluation.overall_score);
-        evaluationCache.set(cacheKey, evaluation);
-      })
-      .catch(error => {
-        console.error('Background evaluation failed:', error.message);
-        evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
-      });
-    
-    // Return processing message with meta refresh
-    // Since JavaScript fetch is blocked by Help Scout's iframe security,
-    // we use meta refresh as a fallback
-    const refreshTime = 15; // seconds
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 16px;">
-        <meta http-equiv="refresh" content="${refreshTime}">
-        <h3>📊 Response Evaluation</h3>
-        <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-          <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;">Auto-refreshing in ${refreshTime} seconds...</p>
-          <div style="margin-top: 8px;">
-            <div style="width: 100%; background: #e0e0e0; height: 4px; border-radius: 2px; overflow: hidden;">
-              <div style="background: #2c5aa0; height: 100%; animation: progress ${refreshTime}s linear;"></div>
-            </div>
-          </div>
-        </div>
-        <style>
-          @keyframes progress {
-            from { width: 0%; }
-            to { width: 100%; }
-          }
-        </style>
-      </div>
-    `;
-    
-    res.json({ html });
+    try {
+      const evaluation = await evaluateResponse(latestResponse, conversation);
+      console.log('OpenAI evaluation completed:', evaluation.overall_score);
+      evaluationCache.set(cacheKey, evaluation);
+      
+      // Generate HTML with results
+      const html = generateEvaluationHTML(evaluation, false, ticket, customer);
+      res.json({ html });
+      
+    } catch (error) {
+      console.error('OpenAI evaluation failed:', error.message);
+      const errorEvaluation = { 
+        overall_score: 0, 
+        error: error.message,
+        categories: {},
+        key_improvements: ['OpenAI evaluation failed - check logs']
+      };
+      evaluationCache.set(cacheKey, errorEvaluation);
+      
+      const html = generateEvaluationHTML(errorEvaluation, false, ticket, customer);
+      res.json({ html });
+    }
 
   } catch (error) {
     console.error('Error:', error);
@@ -371,6 +356,7 @@ Format as JSON with this structure:
     };
   }
 }
+
 
 // Generate HTML for Help Scout sidebar
 function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
