@@ -37,6 +37,14 @@ app.post('/', async (req, res) => {
       });
     }
 
+    // Check if this is a live chat - don't show widget for chats
+    if (ticket.type === 'chat' || ticket.source?.type === 'chat') {
+      console.log('Skipping evaluation for live chat conversation');
+      return res.json({
+        html: ''  // Return empty HTML to hide widget
+      });
+    }
+
     // Get conversation threads from Help Scout API
     const conversation = await getHelpScoutConversation(ticket.id);
     
@@ -136,7 +144,7 @@ app.post('/', async (req, res) => {
         <h3>📊 Response Evaluation</h3>
         <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
           <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;">Refresh this widget in 15 seconds to see results</p>
+          <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
         </div>
       </div>
     `;
