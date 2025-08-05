@@ -472,5 +472,5 @@ app.get('/widget', (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`UPDATED evaluation server running on 0.0.0.0:${PORT}`);
+  console.log(`UPDATED evaluation server WITH AUTO-REFRESH running on 0.0.0.0:${PORT}`);
 });
