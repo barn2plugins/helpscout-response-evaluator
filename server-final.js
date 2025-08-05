@@ -144,14 +144,51 @@ app.post('/', async (req, res) => {
         evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
       });
     
-    // Return simple processing message (no JavaScript)
+    // Return processing message with auto-refresh JavaScript
     const html = `
-      <div style="font-family: Arial, sans-serif; padding: 16px;">
+      <div style="font-family: Arial, sans-serif; padding: 16px;" id="evaluation-widget">
         <h3>📊 Response Evaluation</h3>
         <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
           <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
+          <p style="font-size: 10px; color: #666; margin: 4px 0;" id="status-message">Evaluating response, please wait...</p>
         </div>
+        <script>
+          (function() {
+            let attempts = 0;
+            const maxAttempts = 20; // Try for ~2 minutes (6s intervals)
+            
+            function checkForResults() {
+              attempts++;
+              
+              if (attempts > maxAttempts) {
+                document.getElementById('status-message').innerHTML = 'Evaluation taking longer than expected. <a href="#" onclick="location.reload(); return false;">Click to refresh</a>';
+                return;
+              }
+              
+              fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(${JSON.stringify(req.body)})
+              })
+              .then(response => response.json())
+              .then(data => {
+                if (data.html && !data.html.includes('Processing with OpenAI')) {
+                  document.getElementById('evaluation-widget').innerHTML = data.html;
+                } else {
+                  document.getElementById('status-message').textContent = 'Still processing... (' + (attempts * 6) + 's)';
+                  setTimeout(checkForResults, 6000);
+                }
+              })
+              .catch(error => {
+                console.error('Error checking results:', error);
+                setTimeout(checkForResults, 6000);
+              });
+            }
+            
+            // Start polling after 10 seconds
+            setTimeout(checkForResults, 10000);
+          })();
+        </script>
       </div>
     `;
     
