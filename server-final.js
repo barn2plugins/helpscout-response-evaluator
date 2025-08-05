@@ -115,31 +115,56 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
-    // Start OpenAI evaluation in background
-    console.log('Starting background OpenAI evaluation...');
+    // Try waiting for OpenAI evaluation (test Help Scout timeout limit)
+    console.log('Starting OpenAI evaluation and waiting...');
     
-    evaluateResponse(latestResponse, conversation, isShopify)
-      .then(evaluation => {
-        console.log('Background evaluation completed:', evaluation.overall_score);
-        evaluationCache.set(cacheKey, evaluation);
-      })
-      .catch(error => {
-        console.error('Background evaluation failed:', error.message);
-        evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
-      });
-    
-    // Respond immediately with processing message
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 16px;">
-        <h3>📊 Response Evaluation</h3>
-        <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-          <p style="margin: 4px 0;"><strong>Status:</strong> Evaluating with OpenAI...</p>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh in 15 seconds for detailed results</p>
+    try {
+      const evaluation = await evaluateResponse(latestResponse, conversation, isShopify);
+      console.log('OpenAI evaluation completed:', evaluation.overall_score);
+      evaluationCache.set(cacheKey, evaluation);
+      
+      // Build detailed results HTML (same as cached version)
+      let categoriesHTML = '';
+      if (evaluation.categories) {
+        const cats = evaluation.categories;
+        if (cats.tone_empathy) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Tone & Empathy:</strong> ${cats.tone_empathy.score}/10 - ${cats.tone_empathy.feedback}</p>`;
+        if (cats.clarity_completeness) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Clarity:</strong> ${cats.clarity_completeness.score}/10 - ${cats.clarity_completeness.feedback}</p>`;
+        if (cats.standard_of_english) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>English:</strong> ${cats.standard_of_english.score}/10 - ${cats.standard_of_english.feedback}</p>`;
+        if (cats.problem_resolution) categoriesHTML += `<p style="font-size: 11px; margin: 4px 0;"><strong>Problem Resolution:</strong> ${cats.problem_resolution.score}/10 - ${cats.problem_resolution.feedback}</p>`;
+      }
+      
+      let improvementsHTML = '';
+      if (evaluation.key_improvements && evaluation.key_improvements.length > 0) {
+        improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements:</strong>';
+        evaluation.key_improvements.forEach(improvement => {
+          improvementsHTML += `<li style="font-size: 10px; margin: 2px 0;">${improvement}</li>`;
+        });
+        improvementsHTML += '</div>';
+      }
+      
+      const html = `
+        <div style="font-family: Arial, sans-serif; padding: 16px; max-width: 350px;">
+          <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+          <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
+            <strong style="font-size: 16px;">Overall Score: ${evaluation.overall_score}/10</strong>
+          </div>
+          ${categoriesHTML}
+          ${improvementsHTML}
         </div>
-      </div>
-    `;
-    
-    res.json({ html });
+      `;
+      
+      res.json({ html });
+      
+    } catch (error) {
+      console.error('OpenAI evaluation failed:', error.message);
+      const html = `
+        <div style="font-family: Arial, sans-serif; padding: 16px;">
+          <h3>📊 Response Evaluation</h3>
+          <p style="color: red;">Evaluation failed: ${error.message}</p>
+        </div>
+      `;
+      res.json({ html });
+    }
 
   } catch (error) {
     console.error('Error:', error);
