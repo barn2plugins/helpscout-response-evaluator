@@ -29,23 +29,13 @@ function escapeHtml(text) {
 app.post('/', async (req, res) => {
   try {
     console.log('=== Help Scout Request ===');
-    console.log('Full request body:', JSON.stringify(req.body, null, 2));
-    
     const { ticket, customer, user, mailbox } = req.body;
     
     if (!ticket || !ticket.id) {
-      console.log('No ticket data - ticket object:', ticket);
       return res.json({
         html: '<div style="padding: 20px;">No ticket data received.</div>'
       });
     }
-
-    // Debug: Log ticket data to understand structure
-    console.log('Ticket data:', JSON.stringify({
-      id: ticket.id,
-      type: ticket.type,
-      source: ticket.source
-    }, null, 2));
 
     // Check if this is a live chat - don't show widget for chats
     // Help Scout generates subjects like "Live chat on Aug 5" for chat conversations
@@ -58,11 +48,7 @@ app.post('/', async (req, res) => {
       (ticket.subject && ticket.subject.startsWith('Live chat on '));
 
     if (isChatConversation) {
-      console.log('Skipping evaluation for live chat conversation', { 
-        ticketType: ticket.type, 
-        sourceType: ticket.source?.type,
-        subject: ticket.subject
-      });
+      console.log('Skipping evaluation for live chat conversation');
       return res.json({
         html: ''  // Return empty HTML to hide widget
       });
@@ -102,9 +88,6 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Detect if this is about Shopify (app) or WordPress (plugin)
-    const isShopify = detectShopifyContext(conversation);
-    
     // Create cache key from response text
     const cacheKey = `${ticket.id}_${latestResponse.createdAt}`;
     
@@ -151,7 +134,7 @@ app.post('/', async (req, res) => {
     // Start OpenAI evaluation in background
     console.log('Starting background OpenAI evaluation...');
     
-    evaluateResponse(latestResponse, conversation, isShopify)
+    evaluateResponse(latestResponse, conversation)
       .then(evaluation => {
         console.log('Background evaluation completed:', evaluation.overall_score);
         evaluationCache.set(cacheKey, evaluation);
@@ -253,15 +236,9 @@ function findLatestTeamResponse(conversation) {
   return null;
 }
 
-// Detect if this is a Shopify context
-function detectShopifyContext(conversation) {
-  const allText = JSON.stringify(conversation).toLowerCase();
-  return allText.includes('shopify') || allText.includes('shopify app');
-}
 
 // Evaluate response using OpenAI
-async function evaluateResponse(response, conversation, isShopify) {
-  const productType = isShopify ? 'app' : 'plugin';
+async function evaluateResponse(response, conversation) {
   
   // Clean the response text by removing HTML tags
   const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -274,9 +251,8 @@ SUPPORT TONE REQUIREMENTS:
 3. Should suggest workarounds ONLY when saying something isn't possible (not when providing complete solutions)
 4. Only apologize when the company has done something wrong
 5. Use positive language (avoid "but" and "however")
-6. Include relevant links when mentioning features or documentation
-7. Use "${productType}" not "${isShopify ? 'plugin' : 'app'}" (this is a ${isShopify ? 'Shopify' : 'WordPress'} product)
-8. Focus on being helpful and reassuring, especially for pre-sales
+6. Include relevant links ONLY when specifically mentioning documentation, help articles, or specific features that would benefit from a direct link
+7. Focus on being helpful and reassuring, especially for pre-sales
 
 RESPONSE TO EVALUATE:
 "${cleanText}"
@@ -297,6 +273,7 @@ IMPORTANT FOR KEY IMPROVEMENTS:
 - If the response already does something well (like good English or proper closing), don't suggest "continuing" it
 - If no meaningful improvements are needed, return an empty array
 - Workarounds should only be suggested for negative responses where something isn't possible
+- Only suggest adding links if the response mentions specific features/documentation but lacks helpful links
 - Each improvement should be a specific, actionable suggestion
 
 Then provide an overall score out of 10 and specific suggestions for improvement.
