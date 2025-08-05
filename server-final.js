@@ -134,31 +134,29 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
-    // Start OpenAI evaluation in background
-    console.log('Starting background OpenAI evaluation...');
+    // Wait for OpenAI evaluation to complete
+    console.log('Starting OpenAI evaluation (waiting for completion)...');
     
-    evaluateResponse(latestResponse, conversation)
-      .then(evaluation => {
-        console.log('Background evaluation completed:', evaluation.overall_score);
-        evaluationCache.set(cacheKey, evaluation);
-      })
-      .catch(error => {
-        console.error('Background evaluation failed:', error.message);
-        evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
+    try {
+      const evaluation = await evaluateResponse(latestResponse, conversation);
+      console.log('OpenAI evaluation completed:', evaluation.overall_score);
+      evaluationCache.set(cacheKey, evaluation);
+      
+      // Return complete results immediately
+      const html = generateEvaluationHTML(evaluation, false, ticket, customer);
+      res.json({ html });
+      
+    } catch (error) {
+      console.error('OpenAI evaluation failed:', error.message);
+      res.json({
+        html: `
+          <div style="padding: 20px; font-family: Arial, sans-serif;">
+            <h3>📊 Response Evaluator</h3>
+            <p style="color: red;">OpenAI evaluation failed: ${error.message}</p>
+          </div>
+        `
       });
-    
-    // Return simple processing message
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 16px;">
-        <h3>📊 Response Evaluation</h3>
-        <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-          <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
-        </div>
-      </div>
-    `;
-    
-    res.json({ html });
+    }
 
   } catch (error) {
     console.error('Error:', error);
