@@ -94,11 +94,13 @@ app.post('/', async (req, res) => {
       
       let improvementsHTML = '';
       if (evaluation.key_improvements && evaluation.key_improvements.length > 0) {
-        improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements:</strong>';
+        improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements: </strong><ul style="margin: 4px 0; padding-left: 16px;">';
         evaluation.key_improvements.forEach(improvement => {
           improvementsHTML += `<li style="font-size: 10px; margin: 2px 0;">${improvement}</li>`;
         });
-        improvementsHTML += '</div>';
+        improvementsHTML += '</ul></div>';
+      } else {
+        improvementsHTML = '<div style="margin-top: 12px; padding: 8px; background: #f0f8f0; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements: </strong><span style="font-size: 10px;">No recommendations - excellent response!</span></div>';
       }
       
       const html = `
@@ -115,7 +117,7 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
-    // Start OpenAI evaluation in background, respond immediately with auto-refresh
+    // Start OpenAI evaluation in background
     console.log('Starting background OpenAI evaluation...');
     
     evaluateResponse(latestResponse, conversation, isShopify)
@@ -128,61 +130,15 @@ app.post('/', async (req, res) => {
         evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
       });
     
-    // Return processing message with auto-refresh JavaScript
+    // Return simple processing message (no JavaScript)
     const html = `
-      <div style="font-family: Arial, sans-serif; padding: 16px;" id="evaluation-widget">
+      <div style="font-family: Arial, sans-serif; padding: 16px;">
         <h3>📊 Response Evaluation</h3>
         <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-          <p style="margin: 4px 0;"><strong>Status:</strong> <span id="status">Evaluating with OpenAI...</span></p>
-          <div style="width: 100%; background: #e0e0e0; border-radius: 10px; height: 6px; margin: 8px 0;">
-            <div id="progress" style="width: 0%; background: #2c5aa0; height: 6px; border-radius: 10px; transition: width 0.3s;"></div>
-          </div>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;" id="timer">Checking for results...</p>
+          <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
+          <p style="font-size: 10px; color: #666; margin: 4px 0;">Refresh this widget in 15 seconds to see results</p>
         </div>
       </div>
-      
-      <script>
-        let checkCount = 0;
-        const maxChecks = 10;
-        
-        function updateProgress() {
-          const progress = Math.min((checkCount / maxChecks) * 100, 95);
-          document.getElementById('progress').style.width = progress + '%';
-        }
-        
-        function checkForResults() {
-          checkCount++;
-          updateProgress();
-          
-          document.getElementById('timer').textContent = 'Checking... (' + checkCount + '/' + maxChecks + ')';
-          
-          fetch(window.location.href, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(${JSON.stringify(req.body)})
-          })
-          .then(response => response.json())
-          .then(data => {
-            if (data.html && !data.html.includes('Evaluating with OpenAI')) {
-              document.getElementById('evaluation-widget').innerHTML = data.html;
-            } else if (checkCount < maxChecks) {
-              setTimeout(checkForResults, 3000);
-            } else {
-              document.getElementById('status').textContent = 'Evaluation timeout - please refresh page';
-              document.getElementById('progress').style.background = '#d63638';
-            }
-          })
-          .catch(error => {
-            console.error('Check failed:', error);
-            if (checkCount < maxChecks) {
-              setTimeout(checkForResults, 3000);
-            }
-          });
-        }
-        
-        // Start checking after 5 seconds
-        setTimeout(checkForResults, 5000);
-      </script>
     `;
     
     res.json({ html });
@@ -283,8 +239,8 @@ async function evaluateResponse(response, conversation, isShopify) {
 
 SUPPORT TONE REQUIREMENTS:
 1. MUST start by thanking the customer
-2. MUST end with a polite closing (e.g., "Let me know if you have any questions")
-3. Should suggest workarounds when saying something isn't possible
+2. MUST end with a polite closing - acceptable closings include: "Let me know if you have any questions", "Please let me know what happens", "Best regards", "Many thanks", "Kind regards", or similar polite phrases
+3. Should suggest workarounds ONLY when saying something isn't possible (not when providing complete solutions)
 4. Only apologize when the company has done something wrong
 5. Use positive language (avoid "but" and "however")
 6. Include relevant links when mentioning features or documentation
@@ -305,7 +261,14 @@ For each category, provide:
 - Score out of 10
 - Specific feedback (what was good, what needs improvement)
 
-Then provide an overall score out of 10 and 2-3 key suggestions for improvement.
+IMPORTANT FOR KEY IMPROVEMENTS:
+- Only suggest improvements that are actually needed
+- If the response already does something well (like good English or proper closing), don't suggest "continuing" it
+- If no meaningful improvements are needed, return an empty array
+- Workarounds should only be suggested for negative responses where something isn't possible
+- Each improvement should be a specific, actionable suggestion
+
+Then provide an overall score out of 10 and specific suggestions for improvement.
 
 Format as JSON with this structure:
 {
@@ -334,8 +297,7 @@ Format as JSON with this structure:
   },
   "key_improvements": [
     "Consider suggesting an alternative approach",
-    "Add a link to the relevant documentation",
-    "Use more natural phrasing"
+    "Add a link to the relevant documentation"
   ]
 }`;
 
