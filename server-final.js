@@ -134,31 +134,52 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
-    // Start OpenAI evaluation in background
-    console.log('Starting background OpenAI evaluation...');
+    // Try to complete within Help Scout's ~8 second timeout
+    console.log('Starting OpenAI evaluation (waiting for completion)...');
     
-    evaluateResponse(latestResponse, conversation)
-      .then(evaluation => {
-        console.log('Background evaluation completed:', evaluation.overall_score);
-        evaluationCache.set(cacheKey, evaluation);
-      })
-      .catch(error => {
-        console.error('Background evaluation failed:', error.message);
-        evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
-      });
-    
-    // Return simple processing message
-    const html = `
-      <div style="font-family: Arial, sans-serif; padding: 16px;">
-        <h3>📊 Response Evaluation</h3>
-        <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-          <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-          <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
+    try {
+      // Race between OpenAI and 7-second timeout
+      const evaluation = await Promise.race([
+        evaluateResponse(latestResponse, conversation),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Help Scout timeout')), 7000)
+        )
+      ]);
+      
+      console.log('OpenAI evaluation completed:', evaluation.overall_score);
+      evaluationCache.set(cacheKey, evaluation);
+      
+      // Return complete results immediately - NO REFRESH NEEDED!
+      const html = generateEvaluationHTML(evaluation, false, ticket, customer);
+      res.json({ html });
+      
+    } catch (timeoutError) {
+      console.log('OpenAI taking too long, falling back to background processing...');
+      
+      // Start background evaluation for manual refresh
+      evaluateResponse(latestResponse, conversation)
+        .then(evaluation => {
+          console.log('Background evaluation completed:', evaluation.overall_score);
+          evaluationCache.set(cacheKey, evaluation);
+        })
+        .catch(error => {
+          console.error('Background evaluation failed:', error.message);
+          evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
+        });
+      
+      // Return processing message for manual refresh
+      const html = `
+        <div style="font-family: Arial, sans-serif; padding: 16px;">
+          <h3>📊 Response Evaluation</h3>
+          <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
+            <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
+            <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
+          </div>
         </div>
-      </div>
-    `;
-    
-    res.json({ html });
+      `;
+      
+      res.json({ html });
+    }
 
   } catch (error) {
     console.error('Error:', error);
