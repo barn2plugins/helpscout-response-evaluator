@@ -29,9 +29,12 @@ function escapeHtml(text) {
 app.post('/', async (req, res) => {
   try {
     console.log('=== Help Scout Request ===');
+    console.log('Full request body:', JSON.stringify(req.body, null, 2));
+    
     const { ticket, customer, user, mailbox } = req.body;
     
     if (!ticket || !ticket.id) {
+      console.log('No ticket data - ticket object:', ticket);
       return res.json({
         html: '<div style="padding: 20px;">No ticket data received.</div>'
       });
