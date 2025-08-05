@@ -37,9 +37,26 @@ app.post('/', async (req, res) => {
       });
     }
 
+    // Debug: Log ticket data to understand structure
+    console.log('Ticket data:', JSON.stringify({
+      id: ticket.id,
+      type: ticket.type,
+      source: ticket.source
+    }, null, 2));
+
     // Check if this is a live chat - don't show widget for chats
-    if (ticket.type === 'chat' || ticket.source?.type === 'chat') {
-      console.log('Skipping evaluation for live chat conversation');
+    const isChatConversation = 
+      ticket.type === 'chat' || 
+      ticket.source?.type === 'chat' || 
+      ticket.source?.type === 'beacon' ||
+      (typeof ticket.type === 'string' && ticket.type.toLowerCase() === 'chat') ||
+      (typeof ticket.source?.type === 'string' && ['chat', 'beacon'].includes(ticket.source.type.toLowerCase()));
+
+    if (isChatConversation) {
+      console.log('Skipping evaluation for live chat conversation', { 
+        ticketType: ticket.type, 
+        sourceType: ticket.source?.type 
+      });
       return res.json({
         html: ''  // Return empty HTML to hide widget
       });
