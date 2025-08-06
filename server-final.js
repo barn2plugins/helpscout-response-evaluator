@@ -220,14 +220,17 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Create cache key from ticket and thread ID for better stability
-    const cacheKey = `${ticket.id}_${latestResponse.threadId || latestResponse.createdAt}`;
-    console.log('Cache key:', cacheKey);
+    // Create cache key from ticket and a hash of the response text for true uniqueness
+    const crypto = require('crypto');
+    const responseHash = crypto.createHash('md5').update(latestResponse.text).digest('hex').substring(0, 8);
+    const cacheKey = `${ticket.id}_${responseHash}`;
+    console.log('Cache key:', cacheKey, 'Thread ID:', latestResponse.threadId);
     
     // Check if we already have results
     if (evaluationCache.has(cacheKey)) {
       console.log('Returning cached evaluation results for:', cacheKey);
       const evaluation = evaluationCache.get(cacheKey);
+      console.log('Cached evaluation score:', evaluation.overall_score, 'Key improvements:', evaluation.key_improvements?.length || 0);
       
       // Build detailed results HTML
       let categoriesHTML = '';
