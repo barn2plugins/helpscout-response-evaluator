@@ -130,9 +130,6 @@ app.post('/', async (req, res) => {
           </div>
           ${categoriesHTML}
           ${improvementsHTML}
-          <div style="text-align: center; margin-top: 12px; padding: 8px; background: #f9f9f9; border-radius: 4px; font-size: 10px; color: #666;">
-            💡 Refresh again to see detailed recommendations
-          </div>
         </div>
       `;
       
