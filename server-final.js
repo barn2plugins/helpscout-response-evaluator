@@ -1,8 +1,34 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
-const { Pool } = require('pg');
 require('dotenv').config();
+
+// Google Sheets integration
+const { google } = require('googleapis');
+let sheetsClient = null;
+
+// Initialize Google Sheets client
+try {
+  if (process.env.GOOGLE_CLIENT_EMAIL && process.env.GOOGLE_PRIVATE_KEY && process.env.GOOGLE_SHEET_ID) {
+    const credentials = {
+      type: 'service_account',
+      client_email: process.env.GOOGLE_CLIENT_EMAIL,
+      private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    };
+    
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+    
+    sheetsClient = google.sheets({ version: 'v4', auth });
+    console.log('Google Sheets integration available');
+  } else {
+    console.log('Google Sheets credentials not found - using mock data');
+  }
+} catch (error) {
+  console.log('Google Sheets setup error:', error.message);
+}
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -10,14 +36,15 @@ const PORT = process.env.PORT || 8080;
 // Simple in-memory cache for evaluations
 const evaluationCache = new Map();
 
-// Database connection
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-});
+// Database connection handled above with error checking
 
 // Initialize database
 async function initializeDatabase() {
+  if (!pool) {
+    console.log('Database not available - skipping initialization');
+    return;
+  }
+  
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS evaluations (
@@ -46,37 +73,53 @@ async function initializeDatabase() {
   }
 }
 
-// Save evaluation to database
+// Save evaluation to Google Sheets
 async function saveEvaluation(ticketData, agentName, customerName, responseText, contextText, evaluation) {
+  if (!sheetsClient) {
+    console.log('Google Sheets not available - skipping save');
+    return;
+  }
+  
   try {
     const categories = evaluation.categories || {};
-    await pool.query(`
-      INSERT INTO evaluations (
-        ticket_id, ticket_number, agent_name, customer_name, 
-        response_text, conversation_context, overall_score,
-        tone_score, clarity_score, english_score, resolution_score, structure_score,
-        key_improvements, categories, response_length
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-    `, [
-      ticketData.id,
-      ticketData.number,
-      agentName,
-      customerName,
-      responseText,
-      contextText,
-      evaluation.overall_score,
-      categories.tone_empathy?.score || 0,
-      categories.clarity_completeness?.score || 0,
-      categories.standard_of_english?.score || 0,
-      categories.problem_resolution?.score || 0,
-      categories.following_structure?.score || 0,
-      JSON.stringify(evaluation.key_improvements || []),
-      JSON.stringify(categories),
-      responseText.length
-    ]);
-    console.log('Evaluation saved to database for agent:', agentName);
+    const now = new Date().toISOString();
+    
+    // Prepare the row data matching our sheet columns
+    const rowData = [
+      now, // Evaluation_Date
+      ticketData.id, // Ticket_ID
+      ticketData.number, // Ticket_Number
+      agentName, // Agent_Name
+      customerName, // Customer_Name
+      evaluation.overall_score, // Overall_Score
+      categories.tone_empathy?.score || 0, // Tone_Score
+      categories.clarity_completeness?.score || 0, // Clarity_Score
+      categories.standard_of_english?.score || 0, // English_Score
+      categories.problem_resolution?.score || 0, // Resolution_Score
+      categories.following_structure?.score || 0, // Structure_Score
+      (evaluation.key_improvements || []).join('; '), // Key_Improvements
+      responseText, // Response_Text
+      contextText, // Conversation_Context
+      responseText.length, // Response_Length
+      categories.tone_empathy?.feedback || '', // Tone_Feedback
+      categories.clarity_completeness?.feedback || '', // Clarity_Feedback
+      categories.standard_of_english?.feedback || '', // English_Feedback
+      categories.problem_resolution?.feedback || '', // Resolution_Feedback
+      categories.following_structure?.feedback || '' // Structure_Feedback
+    ];
+
+    await sheetsClient.spreadsheets.values.append({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'Sheet1!A:T', // Append to columns A through T (including feedback columns)
+      valueInputOption: 'USER_ENTERED',
+      resource: {
+        values: [rowData]
+      }
+    });
+    
+    console.log('Evaluation saved to Google Sheets for agent:', agentName);
   } catch (error) {
-    console.error('Database save error:', error);
+    console.error('Google Sheets save error:', error);
   }
 }
 
@@ -551,66 +594,19 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
   }
 }
 
-// CSV Report endpoint
-app.get('/report', async (req, res) => {
-  try {
-    const days = parseInt(req.query.days) || 30;
-    const startDate = req.query.start ? new Date(req.query.start) : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const endDate = req.query.end ? new Date(req.query.end) : new Date();
-
-    console.log(`Generating report from ${startDate.toISOString()} to ${endDate.toISOString()}`);
-
-    // Get agent summary data
-    const agentSummaryQuery = `
-      SELECT 
-        agent_name,
-        COUNT(*) as total_evaluations,
-        ROUND(AVG(overall_score), 2) as avg_overall_score,
-        ROUND(AVG(tone_score), 2) as avg_tone,
-        ROUND(AVG(clarity_score), 2) as avg_clarity,
-        ROUND(AVG(english_score), 2) as avg_english,
-        ROUND(AVG(resolution_score), 2) as avg_resolution,
-        ROUND(AVG(structure_score), 2) as avg_structure,
-        STRING_AGG(key_improvements::text, ' | ') as all_improvements
-      FROM evaluations 
-      WHERE evaluation_date >= $1 AND evaluation_date <= $2
-      GROUP BY agent_name
-      ORDER BY avg_overall_score DESC
-    `;
-
-    const agentResults = await pool.query(agentSummaryQuery, [startDate, endDate]);
-
-    // Generate AI pattern analysis for each agent
-    const csvRows = ['Agent,Total_Evaluations,Avg_Overall_Score,Avg_Tone,Avg_Clarity,Avg_English,Avg_Resolution,Avg_Structure,Date_Range,AI_Pattern_Analysis'];
-    
-    for (const agent of agentResults.rows) {
-      const patternAnalysis = await generatePatternAnalysis(agent.agent_name, agent.all_improvements);
-      const dateRange = `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`;
-      
-      csvRows.push([
-        agent.agent_name,
-        agent.total_evaluations,
-        agent.avg_overall_score,
-        agent.avg_tone,
-        agent.avg_clarity,
-        agent.avg_english,
-        agent.avg_resolution,
-        agent.avg_structure,
-        dateRange,
-        `"${patternAnalysis}"`
-      ].join(','));
-    }
-
-    // Set headers for CSV download
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="helpscout-evaluations-${startDate.toISOString().split('T')[0]}-to-${endDate.toISOString().split('T')[0]}.csv"`);
-    
-    res.send(csvRows.join('\n'));
-
-  } catch (error) {
-    console.error('Report generation error:', error);
-    res.status(500).json({ error: 'Failed to generate report' });
+// Report endpoint - redirect to Google Sheet
+app.get('/report', (req, res) => {
+  if (!process.env.GOOGLE_SHEET_ID) {
+    return res.json({ 
+      error: 'Google Sheets not configured', 
+      message: 'All evaluations are being saved to Google Sheets. Please configure GOOGLE_SHEET_ID to access reports.',
+      sheet_url: 'https://docs.google.com/spreadsheets/d/1UCy71O0ctbEKoYCyx9wFiKyEfs0zT3jcINVebaALfo8/edit#gid=0'
+    });
   }
+  
+  // Redirect to the Google Sheet
+  const sheetUrl = `https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEET_ID}/edit#gid=0`;
+  res.redirect(sheetUrl);
 });
 
 // Generate AI pattern analysis for an agent
@@ -671,7 +667,6 @@ app.get('/widget', (req, res) => {
   `);
 });
 
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`UPDATED evaluation server WITH AUTO-REFRESH running on 0.0.0.0:${PORT}`);
-  await initializeDatabase();
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Help Scout Response Evaluator with Google Sheets running on 0.0.0.0:${PORT}`);
 });
