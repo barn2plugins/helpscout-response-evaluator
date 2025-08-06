@@ -33,8 +33,21 @@ try {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Simple in-memory cache for evaluations
+// Simple in-memory cache for evaluations and tracking saves
 const evaluationCache = new Map();
+const savedToSheets = new Set(); // Track which evaluations have been saved
+
+// Clean up old cache entries every hour to prevent memory issues
+setInterval(() => {
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  for (const [key, value] of evaluationCache.entries()) {
+    if (value.timestamp && value.timestamp < oneHourAgo) {
+      evaluationCache.delete(key);
+      savedToSheets.delete(key);
+    }
+  }
+  console.log('Cache cleanup: Current size:', evaluationCache.size);
+}, 60 * 60 * 1000);
 
 // Database connection handled above with error checking
 
@@ -207,12 +220,13 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Create cache key from response text
-    const cacheKey = `${ticket.id}_${latestResponse.createdAt}`;
+    // Create cache key from ticket and thread ID for better stability
+    const cacheKey = `${ticket.id}_${latestResponse.threadId || latestResponse.createdAt}`;
+    console.log('Cache key:', cacheKey);
     
     // Check if we already have results
     if (evaluationCache.has(cacheKey)) {
-      console.log('Returning cached evaluation results');
+      console.log('Returning cached evaluation results for:', cacheKey);
       const evaluation = evaluationCache.get(cacheKey);
       
       // Build detailed results HTML
@@ -266,12 +280,16 @@ app.post('/', async (req, res) => {
       ]);
       
       console.log('OpenAI evaluation completed:', evaluation.overall_score);
+      evaluation.timestamp = Date.now();
       evaluationCache.set(cacheKey, evaluation);
       
-      // Save to database
-      const agentName = latestResponse.createdBy?.first || 'Unknown';
-      const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
-      await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+      // Save to Google Sheets only if not already saved
+      if (!savedToSheets.has(cacheKey)) {
+        savedToSheets.add(cacheKey);
+        const agentName = latestResponse.createdBy?.first || 'Unknown';
+        const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
+        await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+      }
       
       // Return complete results immediately - NO REFRESH NEEDED!
       const html = generateEvaluationHTML(evaluation, false, ticket, customer);
@@ -284,12 +302,16 @@ app.post('/', async (req, res) => {
       evaluateResponse(latestResponse, conversation)
         .then(async (evaluation) => {
           console.log('Background evaluation completed:', evaluation.overall_score);
+          evaluation.timestamp = Date.now();
           evaluationCache.set(cacheKey, evaluation);
           
-          // Save to database
-          const agentName = latestResponse.createdBy?.first || 'Unknown';
-          const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
-          await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+          // Save to Google Sheets only if not already saved
+          if (!savedToSheets.has(cacheKey)) {
+            savedToSheets.add(cacheKey);
+            const agentName = latestResponse.createdBy?.first || 'Unknown';
+            const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
+            await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+          }
         })
         .catch(error => {
           console.error('Background evaluation failed:', error.message);
@@ -377,11 +399,12 @@ function findLatestTeamResponse(conversation) {
     const isUser = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
     
     if (thread.type === 'message' && isUser && thread.body) {
-      console.log('Found team response from:', thread.createdBy?.first || 'Unknown');
+      console.log('Found team response from:', thread.createdBy?.first || 'Unknown', 'Thread ID:', thread.id);
       return {
         text: thread.body,
         createdAt: thread.createdAt,
-        createdBy: thread.createdBy
+        createdBy: thread.createdBy,
+        threadId: thread.id
       };
     }
   }
@@ -453,6 +476,12 @@ IMPORTANT FOR KEY IMPROVEMENTS:
 - Only suggest adding links if the response mentions specific features/documentation but lacks helpful links
 - For Problem Resolution scoring: Investigation/information gathering responses (asking for more details, requesting access, troubleshooting steps) should be scored based on how well they investigate, NOT whether they provide a final solution
 - Each improvement should be a specific, actionable suggestion
+
+REFUND POLICY GUIDANCE:
+- When customers request refunds, it's good practice to first understand their issue and offer help/solutions before processing the refund
+- Asking "what's your issue" or "how can we help" for refund requests follows proper support policy
+- Only suggest directly processing refunds if the customer has already provided convincing reasons or exhausted other options
+- Score highly when agents gather information about refund requests rather than immediately agreeing to process them
 
 Then provide an overall score out of 10 and specific suggestions for improvement.
 
