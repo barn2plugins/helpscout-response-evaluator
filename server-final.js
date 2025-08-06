@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
@@ -8,6 +9,76 @@ const PORT = process.env.PORT || 8080;
 
 // Simple in-memory cache for evaluations
 const evaluationCache = new Map();
+
+// Database connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+// Initialize database
+async function initializeDatabase() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS evaluations (
+        id SERIAL PRIMARY KEY,
+        ticket_id VARCHAR(50) NOT NULL,
+        ticket_number VARCHAR(50),
+        agent_name VARCHAR(100) NOT NULL,
+        customer_name VARCHAR(200),
+        evaluation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        response_text TEXT NOT NULL,
+        conversation_context TEXT,
+        overall_score DECIMAL(3,1),
+        tone_score DECIMAL(3,1),
+        clarity_score DECIMAL(3,1),
+        english_score DECIMAL(3,1),
+        resolution_score DECIMAL(3,1),
+        structure_score DECIMAL(3,1),
+        key_improvements JSONB,
+        categories JSONB,
+        response_length INTEGER
+      )
+    `);
+    console.log('Database initialized successfully');
+  } catch (error) {
+    console.error('Database initialization error:', error);
+  }
+}
+
+// Save evaluation to database
+async function saveEvaluation(ticketData, agentName, customerName, responseText, contextText, evaluation) {
+  try {
+    const categories = evaluation.categories || {};
+    await pool.query(`
+      INSERT INTO evaluations (
+        ticket_id, ticket_number, agent_name, customer_name, 
+        response_text, conversation_context, overall_score,
+        tone_score, clarity_score, english_score, resolution_score, structure_score,
+        key_improvements, categories, response_length
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    `, [
+      ticketData.id,
+      ticketData.number,
+      agentName,
+      customerName,
+      responseText,
+      contextText,
+      evaluation.overall_score,
+      categories.tone_empathy?.score || 0,
+      categories.clarity_completeness?.score || 0,
+      categories.standard_of_english?.score || 0,
+      categories.problem_resolution?.score || 0,
+      categories.following_structure?.score || 0,
+      JSON.stringify(evaluation.key_improvements || []),
+      JSON.stringify(categories),
+      responseText.length
+    ]);
+    console.log('Evaluation saved to database for agent:', agentName);
+  } catch (error) {
+    console.error('Database save error:', error);
+  }
+}
 
 // Middleware
 app.use(cors());
@@ -136,6 +207,9 @@ app.post('/', async (req, res) => {
       return res.json({ html });
     }
     
+    // Get conversation context for database storage
+    const conversationContext = getConversationContext(conversation);
+    
     // Try to complete within Help Scout's ~8 second timeout
     console.log('Starting OpenAI evaluation (waiting for completion)...');
     
@@ -151,6 +225,11 @@ app.post('/', async (req, res) => {
       console.log('OpenAI evaluation completed:', evaluation.overall_score);
       evaluationCache.set(cacheKey, evaluation);
       
+      // Save to database
+      const agentName = latestResponse.createdBy?.first || 'Unknown';
+      const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
+      await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+      
       // Return complete results immediately - NO REFRESH NEEDED!
       const html = generateEvaluationHTML(evaluation, false, ticket, customer);
       res.json({ html });
@@ -160,9 +239,14 @@ app.post('/', async (req, res) => {
       
       // Start background evaluation for manual refresh
       evaluateResponse(latestResponse, conversation)
-        .then(evaluation => {
+        .then(async (evaluation) => {
           console.log('Background evaluation completed:', evaluation.overall_score);
           evaluationCache.set(cacheKey, evaluation);
+          
+          // Save to database
+          const agentName = latestResponse.createdBy?.first || 'Unknown';
+          const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
+          await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
         })
         .catch(error => {
           console.error('Background evaluation failed:', error.message);
@@ -263,6 +347,24 @@ function findLatestTeamResponse(conversation) {
 }
 
 
+// Get conversation context helper function
+function getConversationContext(conversation) {
+  if (!conversation._embedded?.threads) return '';
+  
+  return [...conversation._embedded.threads]
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+    .slice(-5) // Last 5 messages for context
+    .map(thread => {
+      const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
+      const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
+      const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
+      const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+      return `${sender}: ${text}`;
+    })
+    .filter(msg => msg.length > 10) // Filter out very short messages
+    .join('\n\n');
+}
+
 // Evaluate response using OpenAI
 async function evaluateResponse(response, conversation) {
   
@@ -270,21 +372,7 @@ async function evaluateResponse(response, conversation) {
   const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   
   // Get conversation context (previous 3-4 messages for context)
-  let conversationContext = '';
-  if (conversation._embedded?.threads) {
-    const threads = [...conversation._embedded.threads]
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-      .slice(-5) // Last 5 messages for context
-      .map(thread => {
-        const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
-        const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
-        const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
-        const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
-        return `${sender}: ${text}`;
-      })
-      .filter(msg => msg.length > 10) // Filter out very short messages
-      .join('\n\n');
-  }
+  const conversationContext = getConversationContext(conversation);
   
   const prompt = `You are evaluating a customer support response based on these guidelines:
 
@@ -463,6 +551,115 @@ function generateEvaluationHTML(evaluation, isShopify, ticket, customer) {
   }
 }
 
+// CSV Report endpoint
+app.get('/report', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const startDate = req.query.start ? new Date(req.query.start) : new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const endDate = req.query.end ? new Date(req.query.end) : new Date();
+
+    console.log(`Generating report from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+
+    // Get agent summary data
+    const agentSummaryQuery = `
+      SELECT 
+        agent_name,
+        COUNT(*) as total_evaluations,
+        ROUND(AVG(overall_score), 2) as avg_overall_score,
+        ROUND(AVG(tone_score), 2) as avg_tone,
+        ROUND(AVG(clarity_score), 2) as avg_clarity,
+        ROUND(AVG(english_score), 2) as avg_english,
+        ROUND(AVG(resolution_score), 2) as avg_resolution,
+        ROUND(AVG(structure_score), 2) as avg_structure,
+        STRING_AGG(key_improvements::text, ' | ') as all_improvements
+      FROM evaluations 
+      WHERE evaluation_date >= $1 AND evaluation_date <= $2
+      GROUP BY agent_name
+      ORDER BY avg_overall_score DESC
+    `;
+
+    const agentResults = await pool.query(agentSummaryQuery, [startDate, endDate]);
+
+    // Generate AI pattern analysis for each agent
+    const csvRows = ['Agent,Total_Evaluations,Avg_Overall_Score,Avg_Tone,Avg_Clarity,Avg_English,Avg_Resolution,Avg_Structure,Date_Range,AI_Pattern_Analysis'];
+    
+    for (const agent of agentResults.rows) {
+      const patternAnalysis = await generatePatternAnalysis(agent.agent_name, agent.all_improvements);
+      const dateRange = `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`;
+      
+      csvRows.push([
+        agent.agent_name,
+        agent.total_evaluations,
+        agent.avg_overall_score,
+        agent.avg_tone,
+        agent.avg_clarity,
+        agent.avg_english,
+        agent.avg_resolution,
+        agent.avg_structure,
+        dateRange,
+        `"${patternAnalysis}"`
+      ].join(','));
+    }
+
+    // Set headers for CSV download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="helpscout-evaluations-${startDate.toISOString().split('T')[0]}-to-${endDate.toISOString().split('T')[0]}.csv"`);
+    
+    res.send(csvRows.join('\n'));
+
+  } catch (error) {
+    console.error('Report generation error:', error);
+    res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
+// Generate AI pattern analysis for an agent
+async function generatePatternAnalysis(agentName, allImprovements) {
+  if (!allImprovements || !process.env.OPENAI_API_KEY) {
+    return 'No pattern analysis available';
+  }
+
+  try {
+    const prompt = `Analyze the following improvement suggestions for support agent "${agentName}" and identify recurring patterns or themes. Be concise (under 100 words):
+
+Improvement suggestions: ${allImprovements}
+
+Focus on:
+1. Most common issues
+2. Specific areas for improvement
+3. Any positive patterns
+4. Training recommendations
+
+Provide a brief summary of patterns found.`;
+
+    const apiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert at analyzing customer support feedback to identify training opportunities. Be concise and actionable.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 200
+    }, {
+      headers: {
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    return apiResponse.data.choices[0].message.content.replace(/"/g, '""'); // Escape quotes for CSV
+  } catch (error) {
+    console.error('Pattern analysis error:', error);
+    return 'Pattern analysis failed';
+  }
+}
+
 // Test endpoint
 app.get('/widget', (req, res) => {
   res.send(`
@@ -474,6 +671,7 @@ app.get('/widget', (req, res) => {
   `);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`UPDATED evaluation server WITH AUTO-REFRESH running on 0.0.0.0:${PORT}`);
+  await initializeDatabase();
 });
