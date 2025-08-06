@@ -50,7 +50,12 @@ app.post('/', async (req, res) => {
     if (isChatConversation) {
       console.log('Skipping evaluation for live chat conversation');
       return res.json({
-        html: ''  // Return empty HTML to hide widget
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 16px; text-align: center; color: #666;">
+            <h3 style="margin: 0 0 8px 0; font-size: 14px;">📊 Response Evaluator</h3>
+            <p style="margin: 0; font-size: 12px;">Not available for chats</p>
+          </div>
+        `
       });
     }
 
@@ -267,6 +272,23 @@ async function evaluateResponse(response, conversation) {
   // Clean the response text by removing HTML tags
   const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   
+  // Get conversation context (previous 3-4 messages for context)
+  let conversationContext = '';
+  if (conversation._embedded?.threads) {
+    const threads = [...conversation._embedded.threads]
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
+      .slice(-5) // Last 5 messages for context
+      .map(thread => {
+        const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
+        const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
+        const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
+        const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+        return `${sender}: ${text}`;
+      })
+      .filter(msg => msg.length > 10) // Filter out very short messages
+      .join('\n\n');
+  }
+  
   const prompt = `You are evaluating a customer support response based on these guidelines:
 
 SUPPORT TONE REQUIREMENTS:
@@ -278,14 +300,17 @@ SUPPORT TONE REQUIREMENTS:
 6. Include relevant links ONLY when specifically mentioning documentation, help articles, or specific features that would benefit from a direct link
 7. Focus on being helpful and reassuring, especially for pre-sales
 
-RESPONSE TO EVALUATE:
+CONVERSATION CONTEXT (for understanding the situation):
+${conversationContext ? conversationContext : 'No previous conversation context available'}
+
+RESPONSE TO EVALUATE (most recent team response):
 "${cleanText}"
 
 Please evaluate this response on these criteria:
 1. Tone & Empathy (follows support tone guidelines, thanks customer, polite closing)
 2. Clarity & Completeness (clear, direct answers, addresses all questions)
 3. Standard of English (grammar, spelling, natural phrasing for non-native speakers)
-4. Problem Resolution (addresses actual customer needs, suggests solutions)
+4. Problem Resolution (addresses actual customer needs - distinguish between investigation/information gathering vs providing actual solutions)
 5. Following Structure (proper greeting, closing, correct terminology)
 
 For each category, provide:
@@ -298,6 +323,7 @@ IMPORTANT FOR KEY IMPROVEMENTS:
 - If no meaningful improvements are needed, return an empty array
 - Workarounds should only be suggested for negative responses where something isn't possible
 - Only suggest adding links if the response mentions specific features/documentation but lacks helpful links
+- For Problem Resolution scoring: Investigation/information gathering responses (asking for more details, requesting access, troubleshooting steps) should be scored based on how well they investigate, NOT whether they provide a final solution
 - Each improvement should be a specific, actionable suggestion
 
 Then provide an overall score out of 10 and specific suggestions for improvement.
