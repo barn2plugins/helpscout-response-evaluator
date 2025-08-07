@@ -86,8 +86,8 @@ async function initializeDatabase() {
   }
 }
 
-// Save evaluation to Google Sheets
-async function saveEvaluation(ticketData, agentName, customerName, responseText, contextText, evaluation) {
+// Save evaluation to Google Sheets - NO CUSTOMER PII
+async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
   if (!sheetsClient) {
     console.log('Google Sheets not available - skipping save');
     return;
@@ -97,13 +97,13 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
     
-    // Prepare the row data matching our sheet columns
+    // Prepare the row data WITHOUT any customer information
     const rowData = [
       now, // Evaluation_Date
       ticketData.id, // Ticket_ID
       ticketData.number, // Ticket_Number
       agentName, // Agent_Name
-      customerName, // Customer_Name
+      '', // Customer_Name - REMOVED for privacy
       evaluation.overall_score, // Overall_Score
       categories.tone_empathy?.score || 0, // Tone_Score
       categories.clarity_completeness?.score || 0, // Clarity_Score
@@ -111,8 +111,8 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
       categories.problem_resolution?.score || 0, // Resolution_Score
       categories.following_structure?.score || 0, // Structure_Score
       (evaluation.key_improvements || []).join('; '), // Key_Improvements
-      responseText, // Response_Text
-      contextText, // Conversation_Context
+      responseText.substring(0, 500) + '...', // Response_Text - truncated for privacy
+      'Context removed for privacy', // Conversation_Context - REMOVED
       responseText.length, // Response_Length
       categories.tone_empathy?.feedback || '', // Tone_Feedback
       categories.clarity_completeness?.feedback || '', // Clarity_Feedback
@@ -290,8 +290,7 @@ app.post('/', async (req, res) => {
       if (!savedToSheets.has(cacheKey)) {
         savedToSheets.add(cacheKey);
         const agentName = latestResponse.createdBy?.first || 'Unknown';
-        const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
-        await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+        await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
       }
       
       // Return complete results immediately - NO REFRESH NEEDED!
@@ -312,8 +311,7 @@ app.post('/', async (req, res) => {
           if (!savedToSheets.has(cacheKey)) {
             savedToSheets.add(cacheKey);
             const agentName = latestResponse.createdBy?.first || 'Unknown';
-            const customerName = `${customer.fname || ''} ${customer.lname || ''}`.trim() || customer.email;
-            await saveEvaluation(ticket, agentName, customerName, latestResponse.text, conversationContext, evaluation);
+            await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
           }
         })
         .catch(error => {
@@ -416,7 +414,7 @@ function findLatestTeamResponse(conversation) {
 }
 
 
-// Get conversation context helper function
+// Get ANONYMIZED conversation context - NO CUSTOMER DATA
 function getConversationContext(conversation) {
   if (!conversation._embedded?.threads) return '';
   
@@ -426,7 +424,15 @@ function getConversationContext(conversation) {
     .map(thread => {
       const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
       const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
-      const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
+      
+      // Anonymize sender and redact customer messages
+      const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'AGENT' : 'SYSTEM';
+      
+      // Only include team responses, mark customer messages as redacted
+      if (isCustomer) {
+        return `${sender}: [Customer message redacted for privacy]`;
+      }
+      
       const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
       return `${sender}: ${text}`;
     })
@@ -440,10 +446,12 @@ async function evaluateResponse(response, conversation) {
   // Clean the response text by removing HTML tags
   const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   
-  // Get conversation context (previous 3-4 messages for context)
+  // Get ANONYMIZED conversation context
   const conversationContext = getConversationContext(conversation);
   
   const prompt = `You are evaluating a customer support response based on these guidelines:
+
+IMPORTANT: All customer data has been anonymized for privacy compliance.
 
 SUPPORT TONE REQUIREMENTS:
 1. MUST start by thanking the customer
@@ -454,10 +462,10 @@ SUPPORT TONE REQUIREMENTS:
 6. Include relevant links ONLY when specifically mentioning documentation, help articles, or specific features that would benefit from a direct link
 7. Focus on being helpful and reassuring, especially for pre-sales
 
-CONVERSATION CONTEXT (for understanding the situation):
+CONVERSATION CONTEXT (anonymized for privacy):
 ${conversationContext ? conversationContext : 'No previous conversation context available'}
 
-RESPONSE TO EVALUATE (most recent team response):
+RESPONSE TO EVALUATE (agent's response):
 "${cleanText}"
 
 Please evaluate this response on these criteria:
@@ -530,7 +538,7 @@ Format as JSON with this structure:
       messages: [
         {
           role: 'system',
-          content: 'You are an expert at evaluating customer support responses. Always respond with valid JSON only, no other text.'
+          content: 'You are an expert at evaluating customer support responses. Always respond with valid JSON only, no other text. You are evaluating anonymized data with no personal information.'
         },
         {
           role: 'user',
