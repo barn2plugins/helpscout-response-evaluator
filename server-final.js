@@ -414,7 +414,7 @@ function findLatestTeamResponse(conversation) {
 }
 
 
-// Get ANONYMIZED conversation context - NO CUSTOMER DATA
+// Get conversation context for OpenAI evaluation (keep full context for proper evaluation)
 function getConversationContext(conversation) {
   if (!conversation._embedded?.threads) return '';
   
@@ -424,15 +424,7 @@ function getConversationContext(conversation) {
     .map(thread => {
       const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
       const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
-      
-      // Anonymize sender and redact customer messages
-      const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'AGENT' : 'SYSTEM';
-      
-      // Only include team responses, mark customer messages as redacted
-      if (isCustomer) {
-        return `${sender}: [Customer message redacted for privacy]`;
-      }
-      
+      const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
       const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
       return `${sender}: ${text}`;
     })
@@ -446,12 +438,10 @@ async function evaluateResponse(response, conversation) {
   // Clean the response text by removing HTML tags
   const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   
-  // Get ANONYMIZED conversation context
+  // Get conversation context (full context needed for proper evaluation)
   const conversationContext = getConversationContext(conversation);
   
   const prompt = `You are evaluating a customer support response based on these guidelines:
-
-IMPORTANT: All customer data has been anonymized for privacy compliance.
 
 SUPPORT TONE REQUIREMENTS:
 1. MUST start by thanking the customer
@@ -462,10 +452,10 @@ SUPPORT TONE REQUIREMENTS:
 6. Include relevant links ONLY when specifically mentioning documentation, help articles, or specific features that would benefit from a direct link
 7. Focus on being helpful and reassuring, especially for pre-sales
 
-CONVERSATION CONTEXT (anonymized for privacy):
+CONVERSATION CONTEXT (for understanding the situation):
 ${conversationContext ? conversationContext : 'No previous conversation context available'}
 
-RESPONSE TO EVALUATE (agent's response):
+RESPONSE TO EVALUATE (most recent team response):
 "${cleanText}"
 
 Please evaluate this response on these criteria:
@@ -538,7 +528,7 @@ Format as JSON with this structure:
       messages: [
         {
           role: 'system',
-          content: 'You are an expert at evaluating customer support responses. Always respond with valid JSON only, no other text. You are evaluating anonymized data with no personal information.'
+          content: 'You are an expert at evaluating customer support responses. Always respond with valid JSON only, no other text.'
         },
         {
           role: 'user',
