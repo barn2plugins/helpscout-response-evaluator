@@ -113,28 +113,21 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
   }
   
   try {
-    // DUPLICATE PREVENTION: Check if this ticket+response combination already exists
-    const responseHash = require('crypto').createHash('md5').update(responseText).digest('hex').substring(0, 8);
+    // DUPLICATE PREVENTION: Check if this exact evaluation text already exists anywhere in the sheet
+    const evaluationTextToCheck = responseText.substring(0, 500); // Match what we'll save
+    
     const existingData = await sheetsClient.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!B:O', // Ticket_ID and Response_Text columns
+      range: 'Sheet1!N:N', // Column N contains Response_Text
     });
     
     if (existingData.data.values) {
-      const existingEntries = existingData.data.values;
-      for (const row of existingEntries) {
-        const existingTicketId = row[0]; // Column B (Ticket_ID)
-        const existingResponseText = row[12]; // Column N (Response_Text) 
+      for (const row of existingData.data.values) {
+        const existingResponseText = row[0]; // Column N content
         
-        if (existingTicketId === ticketData.id) {
-          // Check if response text matches (compare first 100 chars to handle truncation)
-          const existingResponsePreview = existingResponseText ? existingResponseText.substring(0, 100) : '';
-          const newResponsePreview = responseText.substring(0, 100);
-          
-          if (existingResponsePreview === newResponsePreview) {
-            console.log(`DUPLICATE DETECTED: Ticket ${ticketData.number} with matching response already exists in Google Sheets - skipping save`);
-            return; // Don't save duplicate
-          }
+        if (existingResponseText && existingResponseText.includes(evaluationTextToCheck)) {
+          console.log(`DUPLICATE DETECTED: Response text already exists in Google Sheets for ticket ${ticketData.number} - skipping save`);
+          return; // Don't save duplicate
         }
       }
     }
@@ -142,7 +135,7 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
     
-    console.log(`SAVING NEW ENTRY: Ticket ${ticketData.number} (${ticketData.id}) - Response hash: ${responseHash}`);
+    console.log(`SAVING NEW ENTRY: Ticket ${ticketData.number} (${ticketData.id})`);
     
     // Prepare the row data WITHOUT any customer information
     const rowData = [
@@ -158,8 +151,8 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
       categories.problem_resolution?.score || 0, // Resolution_Score
       categories.following_structure?.score || 0, // Structure_Score
       (evaluation.key_improvements || []).join('; '), // Key_Improvements
-      responseText.substring(0, 500) + '...', // Response_Text - truncated for privacy
-      'Context removed for privacy', // Conversation_Context - REMOVED
+      responseText, // Response_Text - RESTORED: Full response text for analysis
+      '', // Conversation_Context - Empty for privacy but keeping column structure
       responseText.length, // Response_Length
       categories.tone_empathy?.feedback || '', // Tone_Feedback
       categories.clarity_completeness?.feedback || '', // Clarity_Feedback
