@@ -37,17 +37,35 @@ const PORT = process.env.PORT || 8080;
 const evaluationCache = new Map();
 const savedToSheets = new Set(); // Track which evaluations have been saved
 
-// Clean up old cache entries every hour to prevent memory issues
+// Clean up old cache entries every 24 hours, but only remove entries older than 30 days
+// This provides persistent caching while preventing unlimited memory growth
 setInterval(() => {
-  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days
+  let removedCount = 0;
+  
   for (const [key, value] of evaluationCache.entries()) {
-    if (value.timestamp && value.timestamp < oneHourAgo) {
+    if (value.timestamp && value.timestamp < thirtyDaysAgo) {
       evaluationCache.delete(key);
-      savedToSheets.delete(key);
+      // Keep savedToSheets entry to prevent re-saving duplicates even after cache expiry
+      removedCount++;
     }
   }
-  console.log('Cache cleanup: Current size:', evaluationCache.size);
-}, 60 * 60 * 1000);
+  
+  // Only clear savedToSheets if we've cleared ALL cache entries (prevent memory leak)
+  // But keep a size limit to prevent unlimited growth
+  if (savedToSheets.size > 10000) {
+    // If we have over 10,000 tracked saves, clear the oldest ones
+    const entriesToKeep = Array.from(savedToSheets).slice(-5000);
+    savedToSheets.clear();
+    entriesToKeep.forEach(entry => savedToSheets.add(entry));
+    console.log('Trimmed savedToSheets set to 5000 most recent entries');
+  }
+  
+  if (removedCount > 0) {
+    console.log(`Cache cleanup: Removed ${removedCount} entries older than 30 days`);
+  }
+  console.log('Cache status: Cache size:', evaluationCache.size, 'Saved entries tracked:', savedToSheets.size);
+}, 24 * 60 * 60 * 1000); // Run cleanup once per day
 
 // Database connection handled above with error checking
 
@@ -288,9 +306,12 @@ app.post('/', async (req, res) => {
       
       // Save to Google Sheets only if not already saved
       if (!savedToSheets.has(cacheKey)) {
+        console.log('Saving new evaluation to Google Sheets for cache key:', cacheKey);
         savedToSheets.add(cacheKey);
         const agentName = latestResponse.createdBy?.first || 'Unknown';
         await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
+      } else {
+        console.log('Skipping Google Sheets save - already saved for cache key:', cacheKey);
       }
       
       // Return complete results immediately - NO REFRESH NEEDED!
@@ -309,9 +330,12 @@ app.post('/', async (req, res) => {
           
           // Save to Google Sheets only if not already saved
           if (!savedToSheets.has(cacheKey)) {
+            console.log('Background: Saving new evaluation to Google Sheets for cache key:', cacheKey);
             savedToSheets.add(cacheKey);
             const agentName = latestResponse.createdBy?.first || 'Unknown';
             await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
+          } else {
+            console.log('Background: Skipping Google Sheets save - already saved for cache key:', cacheKey);
           }
         })
         .catch(error => {
