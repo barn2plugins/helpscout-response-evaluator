@@ -36,6 +36,7 @@ const PORT = process.env.PORT || 8080;
 // Simple in-memory cache for evaluations and tracking saves
 const evaluationCache = new Map();
 const savedToSheets = new Set(); // Track which evaluations have been saved
+const processingKeys = new Set(); // Track which evaluations are currently being processed to prevent race conditions
 
 // Clean up old cache entries every 24 hours, but only remove entries older than 30 days
 // This provides persistent caching while preventing unlimited memory growth
@@ -112,8 +113,36 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
   }
   
   try {
+    // DUPLICATE PREVENTION: Check if this ticket+response combination already exists
+    const responseHash = require('crypto').createHash('md5').update(responseText).digest('hex').substring(0, 8);
+    const existingData = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'Sheet1!B:O', // Ticket_ID and Response_Text columns
+    });
+    
+    if (existingData.data.values) {
+      const existingEntries = existingData.data.values;
+      for (const row of existingEntries) {
+        const existingTicketId = row[0]; // Column B (Ticket_ID)
+        const existingResponseText = row[12]; // Column N (Response_Text) 
+        
+        if (existingTicketId === ticketData.id) {
+          // Check if response text matches (compare first 100 chars to handle truncation)
+          const existingResponsePreview = existingResponseText ? existingResponseText.substring(0, 100) : '';
+          const newResponsePreview = responseText.substring(0, 100);
+          
+          if (existingResponsePreview === newResponsePreview) {
+            console.log(`DUPLICATE DETECTED: Ticket ${ticketData.number} with matching response already exists in Google Sheets - skipping save`);
+            return; // Don't save duplicate
+          }
+        }
+      }
+    }
+    
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
+    
+    console.log(`SAVING NEW ENTRY: Ticket ${ticketData.number} (${ticketData.id}) - Response hash: ${responseHash}`);
     
     // Prepare the row data WITHOUT any customer information
     const rowData = [
@@ -244,11 +273,30 @@ app.post('/', async (req, res) => {
     const cacheKey = `${ticket.id}_${responseHash}`;
     console.log('Cache key:', cacheKey, 'Thread ID:', latestResponse.threadId);
     
+    // Check if this evaluation is already being processed (race condition prevention)
+    if (processingKeys.has(cacheKey)) {
+      console.log('Evaluation already in progress for cache key:', cacheKey, '- returning processing message');
+      return res.json({
+        html: `
+          <div style="font-family: Arial, sans-serif; padding: 16px;">
+            <h3>📊 Response Evaluation</h3>
+            <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
+              <p style="margin: 4px 0;"><strong>Status:</strong> Processing...</p>
+              <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view results</p>
+            </div>
+          </div>
+        `
+      });
+    }
+    
     // Check if we already have results
     if (evaluationCache.has(cacheKey)) {
       console.log('Returning cached evaluation results for:', cacheKey);
       const evaluation = evaluationCache.get(cacheKey);
       console.log('Cached evaluation score:', evaluation.overall_score, 'Key improvements:', evaluation.key_improvements?.length || 0);
+      
+      // Cached results should NOT trigger additional saves - they were already saved when first created
+      console.log('Using cached results - no additional save needed for cache key:', cacheKey);
       
       // Build detailed results HTML
       let categoriesHTML = '';
@@ -288,7 +336,8 @@ app.post('/', async (req, res) => {
     // Get conversation context for database storage
     const conversationContext = getConversationContext(conversation);
     
-    // Try to complete within Help Scout's ~8 second timeout
+    // Mark this evaluation as being processed to prevent race conditions
+    processingKeys.add(cacheKey);
     console.log('Starting OpenAI evaluation (waiting for completion)...');
     
     try {
@@ -314,6 +363,9 @@ app.post('/', async (req, res) => {
         console.log('Skipping Google Sheets save - already saved for cache key:', cacheKey);
       }
       
+      // Remove from processing set - evaluation complete
+      processingKeys.delete(cacheKey);
+      
       // Return complete results immediately - NO REFRESH NEEDED!
       const html = generateEvaluationHTML(evaluation, false, ticket, customer);
       res.json({ html });
@@ -337,10 +389,15 @@ app.post('/', async (req, res) => {
           } else {
             console.log('Background: Skipping Google Sheets save - already saved for cache key:', cacheKey);
           }
+          
+          // Remove from processing set - background evaluation complete
+          processingKeys.delete(cacheKey);
         })
         .catch(error => {
           console.error('Background evaluation failed:', error.message);
           evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
+          // Remove from processing set even on error
+          processingKeys.delete(cacheKey);
         });
       
       // Return processing message for manual refresh
@@ -359,6 +416,12 @@ app.post('/', async (req, res) => {
 
   } catch (error) {
     console.error('Error:', error);
+    
+    // Clean up processing key on error
+    if (typeof cacheKey !== 'undefined') {
+      processingKeys.delete(cacheKey);
+    }
+    
     res.json({
       html: `
         <div style="padding: 20px; font-family: Arial, sans-serif;">
