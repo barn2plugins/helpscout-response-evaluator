@@ -278,8 +278,25 @@ app.post('/', async (req, res) => {
       const evaluation = evaluationCache.get(cacheKey);
       console.log('Cached evaluation score:', evaluation.overall_score, 'Key improvements:', evaluation.key_improvements?.length || 0);
       
-      // Cached results should NOT trigger additional saves - they were already saved when first created
-      console.log('Using cached results - no additional save needed for cache key:', cacheKey);
+      // Check if this cached result has been saved to Google Sheets
+      if (!savedToSheets.has(cacheKey)) {
+        console.log('Cached result NOT yet saved to Google Sheets - saving now');
+        savedToSheets.add(cacheKey);
+        const agentName = latestResponse.createdBy?.first || 'Unknown';
+        
+        // Attempt to save in background
+        saveEvaluation(ticket, agentName, latestResponse.text, evaluation)
+          .then(() => {
+            console.log('Successfully saved cached result to Google Sheets');
+          })
+          .catch(error => {
+            console.error('Failed to save cached result:', error);
+            // Remove from savedToSheets so it can be retried
+            savedToSheets.delete(cacheKey);
+          });
+      } else {
+        console.log('Cached result already marked as saved for cache key:', cacheKey);
+      }
       
       // Build detailed results HTML
       let categoriesHTML = '';
