@@ -33,40 +33,8 @@ try {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Simple in-memory cache for evaluations and tracking saves
+// Simple in-memory cache for evaluations
 const evaluationCache = new Map();
-const savedToSheets = new Set(); // Track which evaluations have been saved
-const processingKeys = new Set(); // Track which evaluations are currently being processed to prevent race conditions
-
-// Clean up old cache entries every 24 hours, but only remove entries older than 30 days
-// This provides persistent caching while preventing unlimited memory growth
-setInterval(() => {
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days
-  let removedCount = 0;
-  
-  for (const [key, value] of evaluationCache.entries()) {
-    if (value.timestamp && value.timestamp < thirtyDaysAgo) {
-      evaluationCache.delete(key);
-      // Keep savedToSheets entry to prevent re-saving duplicates even after cache expiry
-      removedCount++;
-    }
-  }
-  
-  // Only clear savedToSheets if we've cleared ALL cache entries (prevent memory leak)
-  // But keep a size limit to prevent unlimited growth
-  if (savedToSheets.size > 10000) {
-    // If we have over 10,000 tracked saves, clear the oldest ones
-    const entriesToKeep = Array.from(savedToSheets).slice(-5000);
-    savedToSheets.clear();
-    entriesToKeep.forEach(entry => savedToSheets.add(entry));
-    console.log('Trimmed savedToSheets set to 5000 most recent entries');
-  }
-  
-  if (removedCount > 0) {
-    console.log(`Cache cleanup: Removed ${removedCount} entries older than 30 days`);
-  }
-  console.log('Cache status: Cache size:', evaluationCache.size, 'Saved entries tracked:', savedToSheets.size);
-}, 24 * 60 * 60 * 1000); // Run cleanup once per day
 
 // Database connection handled above with error checking
 
@@ -106,31 +74,23 @@ async function initializeDatabase() {
 }
 
 // Save evaluation to Google Sheets
-async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
-  console.log('=== saveEvaluation CALLED ===');
-  console.log('Ticket:', ticketData.number, 'ID:', ticketData.id);
-  console.log('Agent:', agentName);
-  console.log('Response length:', responseText?.length);
-  console.log('Sheet ID:', process.env.GOOGLE_SHEET_ID);
-  
+async function saveEvaluation(ticketData, agentName, customerName, responseText, contextText, evaluation) {
   if (!sheetsClient) {
-    console.log('ERROR: Google Sheets client not available - skipping save');
+    console.log('Google Sheets not available - skipping save');
     return;
   }
-  
-  console.log('Google Sheets client exists, attempting save...');
   
   try {
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
     
-    // Prepare the row data - keeping the same structure that was working
+    // Prepare the row data matching our sheet columns
     const rowData = [
       now, // Evaluation_Date
       ticketData.id, // Ticket_ID
       ticketData.number, // Ticket_Number
       agentName, // Agent_Name
-      '', // Customer_Name - empty for privacy
+      customerName, // Customer_Name
       evaluation.overall_score, // Overall_Score
       categories.tone_empathy?.score || 0, // Tone_Score
       categories.clarity_completeness?.score || 0, // Clarity_Score
@@ -138,8 +98,8 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
       categories.problem_resolution?.score || 0, // Resolution_Score
       categories.following_structure?.score || 0, // Structure_Score
       (evaluation.key_improvements || []).join('; '), // Key_Improvements
-      responseText, // Response_Text - full text
-      '', // Conversation_Context - empty for privacy
+      responseText, // Response_Text
+      contextText, // Conversation_Context
       responseText.length, // Response_Length
       categories.tone_empathy?.feedback || '', // Tone_Feedback
       categories.clarity_completeness?.feedback || '', // Clarity_Feedback
@@ -148,28 +108,18 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
       categories.following_structure?.feedback || '' // Structure_Feedback
     ];
 
-    console.log('About to call Google Sheets API with:');
-    console.log('- Range: Sheet1!A:T');
-    console.log('- Row data length:', rowData.length);
-    console.log('- First few values:', rowData.slice(0, 5));
-
-    const appendResult = await sheetsClient.spreadsheets.values.append({
+    await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:T',
+      range: 'Sheet1!A:T', // Append to columns A through T (including feedback columns)
       valueInputOption: 'USER_ENTERED',
       resource: {
         values: [rowData]
       }
     });
-
-    console.log('Google Sheets API response:', JSON.stringify(appendResult.data, null, 2));
     
-    console.log('Evaluation saved to Google Sheets for ticket:', ticketData.number);
+    console.log('Evaluation saved to Google Sheets for agent:', agentName);
   } catch (error) {
-    console.error('Google Sheets save error:', error.message);
-    console.error('Full error details:', JSON.stringify(error.response?.data || error, null, 2));
-    // Re-throw so calling function sees the error
-    throw error;
+    console.error('Google Sheets save error:', error);
   }
 }
 
@@ -257,53 +207,13 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Create cache key from ticket and a hash of the response text for true uniqueness
-    const crypto = require('crypto');
-    const responseHash = crypto.createHash('md5').update(latestResponse.text).digest('hex').substring(0, 8);
-    const cacheKey = `${ticket.id}_${responseHash}`;
-    console.log('Cache key:', cacheKey, 'Thread ID:', latestResponse.threadId);
-    
-    // Check if this evaluation is already being processed (race condition prevention)
-    if (processingKeys.has(cacheKey)) {
-      console.log('Evaluation already in progress for cache key:', cacheKey, '- returning processing message');
-      return res.json({
-        html: `
-          <div style="font-family: Arial, sans-serif; padding: 16px;">
-            <h3>📊 Response Evaluation</h3>
-            <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-              <p style="margin: 4px 0;"><strong>Status:</strong> Processing...</p>
-              <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view results</p>
-            </div>
-          </div>
-        `
-      });
-    }
+    // Create cache key from response text
+    const cacheKey = `${ticket.id}_${latestResponse.createdAt}`;
     
     // Check if we already have results
     if (evaluationCache.has(cacheKey)) {
-      console.log('Returning cached evaluation results for:', cacheKey);
+      console.log('Returning cached evaluation results');
       const evaluation = evaluationCache.get(cacheKey);
-      console.log('Cached evaluation score:', evaluation.overall_score, 'Key improvements:', evaluation.key_improvements?.length || 0);
-      
-      // Check if this cached result has been saved to Google Sheets
-      if (!savedToSheets.has(cacheKey)) {
-        console.log('Cached result NOT yet saved to Google Sheets - saving now');
-        savedToSheets.add(cacheKey);
-        const agentName = latestResponse.createdBy?.first || 'Unknown';
-        
-        // Attempt to save in background
-        saveEvaluation(ticket, agentName, latestResponse.text, evaluation)
-          .then(() => {
-            console.log('Successfully saved cached result to Google Sheets');
-          })
-          .catch(error => {
-            console.error('Failed to save cached result:', error);
-            // Remove from savedToSheets so it can be retried
-            savedToSheets.delete(cacheKey);
-          });
-      } else {
-        console.log('Cached result already marked as saved for cache key:', cacheKey);
-      }
       
       // Build detailed results HTML
       let categoriesHTML = '';
@@ -343,8 +253,7 @@ app.post('/', async (req, res) => {
     // Get conversation context for database storage
     const conversationContext = getConversationContext(conversation);
     
-    // Mark this evaluation as being processed to prevent race conditions
-    processingKeys.add(cacheKey);
+    // Try to complete within Help Scout's ~8 second timeout
     console.log('Starting OpenAI evaluation (waiting for completion)...');
     
     try {
@@ -357,70 +266,41 @@ app.post('/', async (req, res) => {
       ]);
       
       console.log('OpenAI evaluation completed:', evaluation.overall_score);
-      evaluation.timestamp = Date.now();
       evaluationCache.set(cacheKey, evaluation);
       
-      // Save to Google Sheets only if not already saved
-      if (!savedToSheets.has(cacheKey)) {
-        console.log('Saving new evaluation to Google Sheets for cache key:', cacheKey);
-        savedToSheets.add(cacheKey);
-        const agentName = latestResponse.createdBy?.first || 'Unknown';
-        try {
-          await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
-        } catch (saveError) {
-          console.error('Failed to save evaluation to Google Sheets:', saveError);
-          // Remove from savedToSheets so it can be retried
-          savedToSheets.delete(cacheKey);
-        }
-      } else {
-        console.log('Skipping Google Sheets save - already saved for cache key:', cacheKey);
-      }
-      
-      // Remove from processing set - evaluation complete
-      processingKeys.delete(cacheKey);
+      // Save to database
+      const agentName = latestResponse.createdBy?.first || 'Unknown';
+      await saveEvaluation(ticket, agentName, '', latestResponse.text, '', evaluation);
       
       // Return complete results immediately - NO REFRESH NEEDED!
       const html = generateEvaluationHTML(evaluation, false, ticket, customer);
       res.json({ html });
       
     } catch (timeoutError) {
-      console.log('Help Scout timeout reached, continuing in background...');
-      
-      // Remove from processing set immediately to avoid blocking future requests
-      processingKeys.delete(cacheKey);
+      console.log('OpenAI taking too long, falling back to background processing...');
       
       // Start background evaluation for manual refresh
       evaluateResponse(latestResponse, conversation)
         .then(async (evaluation) => {
           console.log('Background evaluation completed:', evaluation.overall_score);
-          evaluation.timestamp = Date.now();
           evaluationCache.set(cacheKey, evaluation);
           
-          // Save to Google Sheets only if not already saved
-          if (!savedToSheets.has(cacheKey)) {
-            console.log('Background: Saving new evaluation to Google Sheets for cache key:', cacheKey);
-            savedToSheets.add(cacheKey);
-            const agentName = latestResponse.createdBy?.first || 'Unknown';
-            try {
-              await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
-            } catch (saveError) {
-              console.error('Background: Failed to save evaluation to Google Sheets:', saveError);
-              savedToSheets.delete(cacheKey);
-            }
-          }
+          // Save to database
+          const agentName = latestResponse.createdBy?.first || 'Unknown';
+          await saveEvaluation(ticket, agentName, '', latestResponse.text, '', evaluation);
         })
         .catch(error => {
           console.error('Background evaluation failed:', error.message);
           evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
         });
       
-      // Return friendly processing message (not "Error")
+      // Return processing message for manual refresh
       const html = `
         <div style="font-family: Arial, sans-serif; padding: 16px;">
-          <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
-          <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px; border-left: 4px solid #4CAF50;">
-            <p style="margin: 4px 0; font-weight: bold;">⏳ Evaluation in Progress</p>
-            <p style="font-size: 11px; color: #666; margin: 8px 0 0 0;">Please refresh in a moment to view the results</p>
+          <h3>📊 Response Evaluation</h3>
+          <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
+            <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
+            <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
           </div>
         </div>
       `;
@@ -430,12 +310,6 @@ app.post('/', async (req, res) => {
 
   } catch (error) {
     console.error('Error:', error);
-    
-    // Clean up processing key on error
-    if (typeof cacheKey !== 'undefined') {
-      processingKeys.delete(cacheKey);
-    }
-    
     res.json({
       html: `
         <div style="padding: 20px; font-family: Arial, sans-serif;">
@@ -501,12 +375,11 @@ function findLatestTeamResponse(conversation) {
     const isUser = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
     
     if (thread.type === 'message' && isUser && thread.body) {
-      console.log('Found team response from:', thread.createdBy?.first || 'Unknown', 'Thread ID:', thread.id);
+      console.log('Found team response from:', thread.createdBy?.first || 'Unknown');
       return {
         text: thread.body,
         createdAt: thread.createdAt,
-        createdBy: thread.createdBy,
-        threadId: thread.id
+        createdBy: thread.createdBy
       };
     }
   }
@@ -515,22 +388,18 @@ function findLatestTeamResponse(conversation) {
 }
 
 
-// Get conversation context for OpenAI evaluation (keep full context for proper evaluation)
+// Get conversation context helper function
 function getConversationContext(conversation) {
   if (!conversation._embedded?.threads) return '';
   
   return [...conversation._embedded.threads]
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-    .slice(-3) // Last 3 messages for context (reduced from 5)
+    .slice(-5) // Last 5 messages for context
     .map(thread => {
       const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
       const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
       const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
-      let text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
-      // Truncate very long messages to save tokens
-      if (text.length > 500) {
-        text = text.substring(0, 500) + '...';
-      }
+      const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
       return `${sender}: ${text}`;
     })
     .filter(msg => msg.length > 10) // Filter out very short messages
@@ -543,26 +412,47 @@ async function evaluateResponse(response, conversation) {
   // Clean the response text by removing HTML tags
   const cleanText = response.text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   
-  // Get conversation context (full context needed for proper evaluation)
+  // Get conversation context (previous 3-4 messages for context)
   const conversationContext = getConversationContext(conversation);
   
-  const prompt = `Evaluate this support response. Must thank customer, have polite closing, use positive language.
+  const prompt = `You are evaluating a customer support response based on these guidelines:
 
-CONTEXT (last 3 messages):
-${conversationContext || 'None'}
+SUPPORT TONE REQUIREMENTS:
+1. MUST start by thanking the customer
+2. MUST end with a polite closing - acceptable closings include: "Let me know if you have any questions", "Please let me know what happens", "Best regards", "Many thanks", "Kind regards", or similar polite phrases
+3. Should suggest workarounds ONLY when saying something isn't possible (not when providing complete solutions)
+4. Only apologize when the company has done something wrong
+5. Use positive language (avoid "but" and "however")
+6. Include relevant links ONLY when specifically mentioning documentation, help articles, or specific features that would benefit from a direct link
+7. Focus on being helpful and reassuring, especially for pre-sales
 
-RESPONSE TO EVALUATE:
-"${cleanText.substring(0, 1000)}"
+CONVERSATION CONTEXT (for understanding the situation):
+${conversationContext ? conversationContext : 'No previous conversation context available'}
 
-Score (1-10) these 5 criteria with brief feedback:
-1. Tone & Empathy (thanks, closing)
-2. Clarity (answers questions)
-3. English (grammar, spelling)
-4. Problem Resolution (solves or investigates well)
-5. Structure (greeting, closing)
+RESPONSE TO EVALUATE (most recent team response):
+"${cleanText}"
 
-Only suggest improvements if truly needed. Investigation responses are valid.
-For refunds: gathering info before processing is good.
+Please evaluate this response on these criteria:
+1. Tone & Empathy (follows support tone guidelines, thanks customer, polite closing)
+2. Clarity & Completeness (clear, direct answers, addresses all questions)
+3. Standard of English (grammar, spelling, natural phrasing for non-native speakers)
+4. Problem Resolution (addresses actual customer needs - distinguish between investigation/information gathering vs providing actual solutions)
+5. Following Structure (proper greeting, closing, correct terminology)
+
+For each category, provide:
+- Score out of 10
+- Specific feedback (what was good, what needs improvement)
+
+IMPORTANT FOR KEY IMPROVEMENTS:
+- Only suggest improvements that are actually needed
+- If the response already does something well (like good English or proper closing), don't suggest "continuing" it
+- If no meaningful improvements are needed, return an empty array
+- Workarounds should only be suggested for negative responses where something isn't possible
+- Only suggest adding links if the response mentions specific features/documentation but lacks helpful links
+- For Problem Resolution scoring: Investigation/information gathering responses (asking for more details, requesting access, troubleshooting steps) should be scored based on how well they investigate, NOT whether they provide a final solution
+- Each improvement should be a specific, actionable suggestion
+
+Then provide an overall score out of 10 and specific suggestions for improvement.
 
 Format as JSON with this structure:
 {
@@ -602,7 +492,7 @@ Format as JSON with this structure:
 
     console.log('Making OpenAI API call...');
     const apiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-3.5-turbo', // Changed from gpt-4 for 90% cost savings
+      model: 'gpt-4',
       messages: [
         {
           role: 'system',
@@ -773,139 +663,6 @@ app.get('/widget', (req, res) => {
       <p>Time: ${new Date().toISOString()}</p>
     </div>
   `);
-});
-
-// Cache management endpoint
-app.get('/cache/clear', (req, res) => {
-  const previousSize = evaluationCache.size;
-  const previousSavedSize = savedToSheets.size;
-  
-  evaluationCache.clear();
-  savedToSheets.clear();
-  processingKeys.clear();
-  
-  console.log(`Cache cleared! Previous cache size: ${previousSize}, Previous saved tracking: ${previousSavedSize}`);
-  
-  res.json({
-    message: 'Cache cleared successfully',
-    previousCacheSize: previousSize,
-    previousSavedSize: previousSavedSize,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Cache status endpoint
-app.get('/cache/status', (req, res) => {
-  res.json({
-    cacheSize: evaluationCache.size,
-    savedToSheetsSize: savedToSheets.size,
-    processingSize: processingKeys.size,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Test Google Sheets connection
-app.get('/test/sheets', async (req, res) => {
-  try {
-    if (!sheetsClient) {
-      return res.json({
-        error: 'Google Sheets client not initialized',
-        sheetId: process.env.GOOGLE_SHEET_ID || 'NOT_SET',
-        clientEmail: process.env.GOOGLE_CLIENT_EMAIL || 'NOT_SET'
-      });
-    }
-
-    console.log('Testing Google Sheets connection...');
-    console.log('Sheet ID:', process.env.GOOGLE_SHEET_ID);
-
-    // First get spreadsheet metadata to see all sheets/tabs
-    const spreadsheetInfo = await sheetsClient.spreadsheets.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID
-    });
-
-    const sheets = spreadsheetInfo.data.sheets.map(sheet => ({
-      title: sheet.properties.title,
-      sheetId: sheet.properties.sheetId,
-      rowCount: sheet.properties.gridProperties.rowCount,
-      columnCount: sheet.properties.gridProperties.columnCount
-    }));
-
-    console.log('Available sheets:', sheets);
-
-    // Read all data from the first sheet to see what's there
-    const firstSheetName = sheets[0]?.title || 'Sheet1';
-    const allData = await sheetsClient.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `${firstSheetName}!A:T`
-    });
-
-    console.log('Current data rows:', allData.data.values?.length || 0);
-    if (allData.data.values) {
-      console.log('First few rows:', allData.data.values.slice(0, 5));
-    }
-
-    // Write test data with a unique identifier
-    const timestamp = new Date().toISOString();
-    const testRow = [
-      timestamp,
-      'TEST_TICKET_ID_' + Date.now(),
-      'TEST123',
-      'TestAgent',
-      '',
-      9.0,
-      9,8,9,8,9,
-      'Test improvements ' + timestamp,
-      'This is a test response to verify Google Sheets integration - ' + timestamp,
-      '',
-      50,
-      'Test feedback 1',
-      'Test feedback 2', 
-      'Test feedback 3',
-      'Test feedback 4',
-      'Test feedback 5'
-    ];
-
-    const writeResult = await sheetsClient.spreadsheets.values.append({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `${firstSheetName}!A:T`,
-      valueInputOption: 'USER_ENTERED',
-      resource: {
-        values: [testRow]
-      }
-    });
-
-    console.log('Write result:', writeResult.data);
-
-    // Read the data again to confirm it was written
-    const afterWrite = await sheetsClient.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: `${firstSheetName}!A:T`
-    });
-
-    res.json({
-      success: true,
-      message: 'Google Sheets connection working',
-      sheetId: process.env.GOOGLE_SHEET_ID,
-      availableSheets: sheets,
-      targetSheet: firstSheetName,
-      rowsBeforeWrite: allData.data.values?.length || 0,
-      rowsAfterWrite: afterWrite.data.values?.length || 0,
-      testRowTimestamp: timestamp,
-      writeRange: writeResult.data.tableRange,
-      sheetUrl: `https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEET_ID}`,
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error('Google Sheets test failed:', error);
-    res.status(500).json({
-      error: 'Google Sheets test failed',
-      message: error.message,
-      details: error.response?.data || 'No additional details',
-      sheetId: process.env.GOOGLE_SHEET_ID || 'NOT_SET',
-      timestamp: new Date().toISOString()
-    });
-  }
 });
 
 app.listen(PORT, '0.0.0.0', () => {
