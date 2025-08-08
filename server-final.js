@@ -36,6 +36,9 @@ const PORT = process.env.PORT || 8080;
 // Simple in-memory cache for evaluations
 const evaluationCache = new Map();
 
+// Track running OpenAI requests to prevent duplicates
+const runningEvaluations = new Map();
+
 // Database connection handled above with error checking
 
 // Initialize database
@@ -222,9 +225,10 @@ app.post('/', async (req, res) => {
     console.log('Cache key:', cacheKey);
     console.log('Cache size:', evaluationCache.size);
     console.log('Cache has key?', evaluationCache.has(cacheKey));
+    console.log('Already processing?', runningEvaluations.has(cacheKey));
     
     // CRITICAL: Check Google Sheets for existing evaluation to avoid duplicate OpenAI calls
-    if (!evaluationCache.has(cacheKey)) {
+    if (!evaluationCache.has(cacheKey) && !runningEvaluations.has(cacheKey)) {
       console.log('Not in memory cache, checking Google Sheets for existing evaluation...');
       try {
         if (sheetsClient) {
@@ -316,6 +320,9 @@ app.post('/', async (req, res) => {
     // Try to complete within Help Scout's ~8 second timeout
     console.log('Starting OpenAI evaluation (waiting for completion)...');
     
+    // Mark as processing to prevent duplicates
+    runningEvaluations.set(cacheKey, true);
+    
     try {
       // Race between OpenAI and 7-second timeout
       const evaluation = await Promise.race([
@@ -328,6 +335,7 @@ app.post('/', async (req, res) => {
       console.log('OpenAI evaluation completed:', evaluation.overall_score);
       console.log('CACHING RESULT with key:', cacheKey);
       evaluationCache.set(cacheKey, evaluation);
+      runningEvaluations.delete(cacheKey); // Mark as completed
       
       // Save to database
       const agentName = latestResponse.createdBy?.first || 'Unknown';
@@ -346,6 +354,7 @@ app.post('/', async (req, res) => {
           console.log('Background evaluation completed:', evaluation.overall_score);
           console.log('CACHING BACKGROUND RESULT with key:', cacheKey);
           evaluationCache.set(cacheKey, evaluation);
+          runningEvaluations.delete(cacheKey); // Mark as completed
           
           // Save to database
           const agentName = latestResponse.createdBy?.first || 'Unknown';
@@ -354,6 +363,7 @@ app.post('/', async (req, res) => {
         .catch(error => {
           console.error('Background evaluation failed:', error.message);
           evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
+          runningEvaluations.delete(cacheKey); // Mark as completed even on error
         });
       
       // Return processing message
