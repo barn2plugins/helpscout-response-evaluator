@@ -113,24 +113,24 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
   }
   
   try {
-    // DUPLICATE PREVENTION: Check if this exact evaluation text already exists anywhere in the sheet
-    const evaluationTextToCheck = responseText.substring(0, 500); // Match what we'll save
-    
+    // DUPLICATE PREVENTION: Check if this exact response text already exists in column M
     const existingData = await sheetsClient.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!N:N', // Column N contains Response_Text
+      range: 'Sheet1!M:M', // Column M contains Response_Text
     });
     
     if (existingData.data.values) {
       for (const row of existingData.data.values) {
-        const existingResponseText = row[0]; // Column N content
+        const existingResponseText = row[0]; // Column M content
         
-        if (existingResponseText && existingResponseText.includes(evaluationTextToCheck)) {
-          console.log(`DUPLICATE DETECTED: Response text already exists in Google Sheets for ticket ${ticketData.number} - skipping save`);
+        if (existingResponseText && existingResponseText === responseText) {
+          console.log(`DUPLICATE DETECTED: Exact response text already exists in Google Sheets for ticket ${ticketData.number} - skipping save`);
           return; // Don't save duplicate
         }
       }
     }
+    
+    console.log(`DUPLICATE CHECK PASSED: Response text not found in existing entries - proceeding with save for ticket ${ticketData.number}`);
     
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
