@@ -251,16 +251,30 @@ app.post('/', async (req, res) => {
             console.log('FOUND EXISTING EVALUATION in Google Sheets - no OpenAI call needed!');
             console.log('Existing row data:', existingRow.slice(0, 5)); // First 5 fields for debug
             
-            // Return the existing evaluation from the sheet
+            // Reconstruct full evaluation from spreadsheet data
+            const categoriesHTML = `
+              <p style="font-size: 11px; margin: 4px 0;"><strong>Tone & Empathy:</strong> ${existingRow[5] || 0}/10 - ${existingRow[12] || 'N/A'}</p>
+              <p style="font-size: 11px; margin: 4px 0;"><strong>Clarity:</strong> ${existingRow[6] || 0}/10 - ${existingRow[13] || 'N/A'}</p>
+              <p style="font-size: 11px; margin: 4px 0;"><strong>English:</strong> ${existingRow[7] || 0}/10 - ${existingRow[14] || 'N/A'}</p>
+              <p style="font-size: 11px; margin: 4px 0;"><strong>Problem Resolution:</strong> ${existingRow[8] || 0}/10 - ${existingRow[15] || 'N/A'}</p>
+            `;
+            
+            const keyImprovements = existingRow[9] || 'No recommendations';
+            const improvementsHTML = keyImprovements === 'No recommendations' 
+              ? '<div style="margin-top: 12px; padding: 8px; background: #f0f8f0; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements: </strong><span style="font-size: 10px;">No recommendations - excellent response!</span></div>'
+              : `<div style="margin-top: 12px; padding: 8px; background: #fff9e6; border-radius: 4px;"><strong style="font-size: 11px;">Key Improvements: </strong><span style="font-size: 10px;">${keyImprovements}</span></div>`;
+            
+            // Return the full evaluation from cached data
             const html = `
-              <div style="font-family: Arial, sans-serif; padding: 16px;">
-                <h3>📊 Response Evaluation</h3>
+              <div style="font-family: Arial, sans-serif; padding: 16px; max-width: 350px;">
+                <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
                 <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
                   <strong style="font-size: 16px;">Overall Score: ${existingRow[4] || 'N/A'}/10</strong>
                 </div>
-                <p style="font-size: 11px; margin: 4px 0;"><strong>Key Improvements:</strong> ${existingRow[9] || 'No recommendations'}</p>
-                <div style="margin-top: 8px; padding: 8px; background: #f9f9f9; border-radius: 4px;">
-                  <p style="font-size: 10px; color: #666; margin: 0;">Previously evaluated - using cached result</p>
+                ${categoriesHTML}
+                ${improvementsHTML}
+                <div style="margin-top: 8px; padding: 6px; background: #f0f0f0; border-radius: 4px;">
+                  <p style="font-size: 9px; color: #666; margin: 0;">✓ Using cached evaluation from ${existingRow[0] ? new Date(existingRow[0]).toLocaleString() : 'earlier'}</p>
                 </div>
               </div>
             `;
