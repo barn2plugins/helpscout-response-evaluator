@@ -820,6 +820,80 @@ app.get('/cache/status', (req, res) => {
   });
 });
 
+// Test Google Sheets connection
+app.get('/test/sheets', async (req, res) => {
+  try {
+    if (!sheetsClient) {
+      return res.json({
+        error: 'Google Sheets client not initialized',
+        sheetId: process.env.GOOGLE_SHEET_ID || 'NOT_SET',
+        clientEmail: process.env.GOOGLE_CLIENT_EMAIL || 'NOT_SET'
+      });
+    }
+
+    console.log('Testing Google Sheets connection...');
+    console.log('Sheet ID:', process.env.GOOGLE_SHEET_ID);
+
+    // Try to read the first few rows to test connection
+    const testRead = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'Sheet1!A1:T10', // First 10 rows, all columns
+    });
+
+    console.log('Google Sheets test read successful');
+    console.log('Rows returned:', testRead.data.values?.length || 0);
+
+    // Try to write a test row
+    const testRow = [
+      new Date().toISOString(),
+      'TEST_TICKET_ID',
+      'TEST123',
+      'TestAgent',
+      '',
+      9.0,
+      9,8,9,8,9,
+      'Test improvements',
+      'This is a test response to verify Google Sheets integration',
+      '',
+      50,
+      'Test feedback 1',
+      'Test feedback 2',
+      'Test feedback 3',
+      'Test feedback 4',
+      'Test feedback 5'
+    ];
+
+    await sheetsClient.spreadsheets.values.append({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'Sheet1!A:T',
+      valueInputOption: 'USER_ENTERED',
+      resource: {
+        values: [testRow]
+      }
+    });
+
+    console.log('Google Sheets test write successful');
+
+    res.json({
+      success: true,
+      message: 'Google Sheets connection working',
+      sheetId: process.env.GOOGLE_SHEET_ID,
+      rowsRead: testRead.data.values?.length || 0,
+      testRowAdded: true,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Google Sheets test failed:', error);
+    res.status(500).json({
+      error: 'Google Sheets test failed',
+      message: error.message,
+      sheetId: process.env.GOOGLE_SHEET_ID || 'NOT_SET',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Help Scout Response Evaluator with Google Sheets running on 0.0.0.0:${PORT}`);
 });
