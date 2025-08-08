@@ -97,7 +97,7 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
       categories.standard_of_english?.score || 0, // English_Score
       categories.problem_resolution?.score || 0, // Resolution_Score
       categories.following_structure?.score || 0, // Structure_Score
-      (evaluation.key_improvements || []).join('; '), // Key_Improvements
+      Array.isArray(evaluation.key_improvements) ? evaluation.key_improvements.join('; ') : (evaluation.key_improvements || 'None'), // Key_Improvements
       responseText, // Response_Text
       contextText, // Conversation_Context
       responseText.length, // Response_Length
@@ -116,7 +116,7 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
     
     const result = await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:A', // Simple range to append to next available row
+      range: 'Sheet1!A1:T1', // Append after header row
       valueInputOption: 'USER_ENTERED',
       resource: {
         values: [rowData]
@@ -303,7 +303,7 @@ app.post('/', async (req, res) => {
     } catch (timeoutError) {
       console.log('OpenAI taking too long, falling back to background processing...');
       
-      // Start background evaluation for manual refresh
+      // Start background evaluation and return processing message
       evaluateResponse(latestResponse, conversation)
         .then(async (evaluation) => {
           console.log('Background evaluation completed:', evaluation.overall_score);
@@ -319,13 +319,13 @@ app.post('/', async (req, res) => {
           evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
         });
       
-      // Return processing message for manual refresh
+      // Return processing message
       const html = `
         <div style="font-family: Arial, sans-serif; padding: 16px;">
           <h3>📊 Response Evaluation</h3>
           <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
             <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-            <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
+            <p style="font-size: 10px; color: #666; margin: 4px 0;">Refresh in 10-15 seconds for results</p>
           </div>
         </div>
       `;
