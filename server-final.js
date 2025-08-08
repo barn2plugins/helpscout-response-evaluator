@@ -235,11 +235,12 @@ app.post('/', async (req, res) => {
           console.log('Fetching existing data from Google Sheets...');
           const existingData = await sheetsClient.spreadsheets.values.get({
             spreadsheetId: process.env.GOOGLE_SHEET_ID,
-            range: 'Sheet1!A1:P1000'  // Get first 1000 rows explicitly
+            range: 'Sheet1'  // Get entire sheet
           });
           
           const rows = existingData.data.values || [];
           console.log(`Found ${rows.length} rows in Google Sheets`);
+          console.log('First few rows:', rows.slice(0, 3).map(row => row ? row.slice(0, 5) : 'empty'));
           console.log('Looking for ticket ID:', ticket.id.toString());
           console.log('Today date:', new Date().toISOString().split('T')[0]);
           
