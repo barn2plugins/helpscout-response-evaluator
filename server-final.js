@@ -113,24 +113,39 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
   }
   
   try {
-    // DUPLICATE PREVENTION: Check if this exact response text already exists in column M
-    const existingData = await sheetsClient.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!M:M', // Column M contains Response_Text
-    });
-    
-    if (existingData.data.values) {
-      for (const row of existingData.data.values) {
-        const existingResponseText = row[0]; // Column M content
+    // DUPLICATE PREVENTION: Try to check for existing entries, but don't fail if there's an issue
+    try {
+      const existingData = await sheetsClient.spreadsheets.values.get({
+        spreadsheetId: process.env.GOOGLE_SHEET_ID,
+        range: 'Sheet1!B:M', // Get columns B (Ticket_ID) and M (Response_Text)
+      });
+      
+      if (existingData.data.values && existingData.data.values.length > 1) {
+        // Skip header row if present
+        const dataRows = existingData.data.values.slice(1);
         
-        if (existingResponseText && existingResponseText === responseText) {
-          console.log(`DUPLICATE DETECTED: Exact response text already exists in Google Sheets for ticket ${ticketData.number} - skipping save`);
-          return; // Don't save duplicate
+        for (const row of dataRows) {
+          const existingTicketId = row[0]; // Column B (Ticket_ID)
+          const existingResponseText = row[11]; // Column M (Response_Text) - 11th index from B
+          
+          // Check if same ticket with same response already exists
+          if (existingTicketId === ticketData.id && existingResponseText) {
+            // Compare first 200 chars to handle any truncation
+            const existingPreview = existingResponseText.substring(0, 200);
+            const newPreview = responseText.substring(0, 200);
+            
+            if (existingPreview === newPreview) {
+              console.log(`DUPLICATE DETECTED: Ticket ${ticketData.number} with same response already in Google Sheets - skipping save`);
+              return; // Don't save duplicate
+            }
+          }
         }
       }
+      console.log(`DUPLICATE CHECK PASSED: Proceeding with save for ticket ${ticketData.number}`);
+    } catch (dupCheckError) {
+      // If duplicate check fails, log it but continue with save
+      console.log('WARNING: Duplicate check failed, proceeding with save anyway:', dupCheckError.message);
     }
-    
-    console.log(`DUPLICATE CHECK PASSED: Response text not found in existing entries - proceeding with save for ticket ${ticketData.number}`);
     
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
@@ -500,12 +515,16 @@ function getConversationContext(conversation) {
   
   return [...conversation._embedded.threads]
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-    .slice(-5) // Last 5 messages for context
+    .slice(-3) // Last 3 messages for context (reduced from 5)
     .map(thread => {
       const isCustomer = thread.createdBy === 'customer' || thread.createdBy?.type === 'customer';
       const isTeam = thread.createdBy === 'user' || thread.createdBy?.type === 'user';
       const sender = isCustomer ? 'CUSTOMER' : isTeam ? 'TEAM' : 'SYSTEM';
-      const text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+      let text = thread.body ? thread.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
+      // Truncate very long messages to save tokens
+      if (text.length > 500) {
+        text = text.substring(0, 500) + '...';
+      }
       return `${sender}: ${text}`;
     })
     .filter(msg => msg.length > 10) // Filter out very short messages
@@ -521,50 +540,23 @@ async function evaluateResponse(response, conversation) {
   // Get conversation context (full context needed for proper evaluation)
   const conversationContext = getConversationContext(conversation);
   
-  const prompt = `You are evaluating a customer support response based on these guidelines:
+  const prompt = `Evaluate this support response. Must thank customer, have polite closing, use positive language.
 
-SUPPORT TONE REQUIREMENTS:
-1. MUST start by thanking the customer
-2. MUST end with a polite closing - acceptable closings include: "Let me know if you have any questions", "Please let me know what happens", "Best regards", "Many thanks", "Kind regards", or similar polite phrases
-3. Should suggest workarounds ONLY when saying something isn't possible (not when providing complete solutions)
-4. Only apologize when the company has done something wrong
-5. Use positive language (avoid "but" and "however")
-6. Include relevant links ONLY when specifically mentioning documentation, help articles, or specific features that would benefit from a direct link
-7. Focus on being helpful and reassuring, especially for pre-sales
+CONTEXT (last 3 messages):
+${conversationContext || 'None'}
 
-CONVERSATION CONTEXT (for understanding the situation):
-${conversationContext ? conversationContext : 'No previous conversation context available'}
+RESPONSE TO EVALUATE:
+"${cleanText.substring(0, 1000)}"
 
-RESPONSE TO EVALUATE (most recent team response):
-"${cleanText}"
+Score (1-10) these 5 criteria with brief feedback:
+1. Tone & Empathy (thanks, closing)
+2. Clarity (answers questions)
+3. English (grammar, spelling)
+4. Problem Resolution (solves or investigates well)
+5. Structure (greeting, closing)
 
-Please evaluate this response on these criteria:
-1. Tone & Empathy (follows support tone guidelines, thanks customer, polite closing)
-2. Clarity & Completeness (clear, direct answers, addresses all questions)
-3. Standard of English (grammar, spelling, natural phrasing for non-native speakers)
-4. Problem Resolution (addresses actual customer needs - distinguish between investigation/information gathering vs providing actual solutions)
-5. Following Structure (proper greeting, closing, correct terminology)
-
-For each category, provide:
-- Score out of 10
-- Specific feedback (what was good, what needs improvement)
-
-IMPORTANT FOR KEY IMPROVEMENTS:
-- Only suggest improvements that are actually needed
-- If the response already does something well (like good English or proper closing), don't suggest "continuing" it
-- If no meaningful improvements are needed, return an empty array
-- Workarounds should only be suggested for negative responses where something isn't possible
-- Only suggest adding links if the response mentions specific features/documentation but lacks helpful links
-- For Problem Resolution scoring: Investigation/information gathering responses (asking for more details, requesting access, troubleshooting steps) should be scored based on how well they investigate, NOT whether they provide a final solution
-- Each improvement should be a specific, actionable suggestion
-
-REFUND POLICY GUIDANCE:
-- When customers request refunds, it's good practice to first understand their issue and offer help/solutions before processing the refund
-- Asking "what's your issue" or "how can we help" for refund requests follows proper support policy
-- Only suggest directly processing refunds if the customer has already provided convincing reasons or exhausted other options
-- Score highly when agents gather information about refund requests rather than immediately agreeing to process them
-
-Then provide an overall score out of 10 and specific suggestions for improvement.
+Only suggest improvements if truly needed. Investigation responses are valid.
+For refunds: gathering info before processing is good.
 
 Format as JSON with this structure:
 {
@@ -604,7 +596,7 @@ Format as JSON with this structure:
 
     console.log('Making OpenAI API call...');
     const apiResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
-      model: 'gpt-4',
+      model: 'gpt-3.5-turbo', // Changed from gpt-4 for 90% cost savings
       messages: [
         {
           role: 'system',
