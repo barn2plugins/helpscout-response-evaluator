@@ -95,7 +95,7 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
       categories.clarity_completeness?.score || 0, // Clarity Score
       categories.standard_of_english?.score || 0, // English Score
       categories.problem_resolution?.score || 0, // Resolution Score
-      Array.isArray(evaluation.key_improvements) ? evaluation.key_improvements.join('; ') : (evaluation.key_improvements || 'No recommendations'), // Response Text (Key Improvements)
+      Array.isArray(evaluation.key_improvements) && evaluation.key_improvements.length > 0 ? evaluation.key_improvements.join('; ') : 'No recommendations', // Response Text (Key Improvements)
       responseText, // Conversation Context (Response Text)
       responseText.length, // Response Length
       categories.tone_empathy?.feedback || '', // Tone Empathy
@@ -228,21 +228,24 @@ app.post('/', async (req, res) => {
       console.log('Not in memory cache, checking Google Sheets for existing evaluation...');
       try {
         if (sheetsClient) {
+          console.log('Fetching existing data from Google Sheets...');
           const existingData = await sheetsClient.spreadsheets.values.get({
             spreadsheetId: process.env.GOOGLE_SHEET_ID,
             range: 'Sheet1!A:P'
           });
           
           const rows = existingData.data.values || [];
-          // Check if this ticket ID + response hash already exists
-          const existingRow = rows.find(row => 
-            row[1] === ticket.id.toString() && 
-            row[0] && 
-            row[0].includes(new Date().toISOString().split('T')[0]) // Same day
-          );
+          console.log(`Found ${rows.length} rows in Google Sheets`);
+          console.log('Looking for ticket ID:', ticket.id.toString());
+          console.log('Today date:', new Date().toISOString().split('T')[0]);
+          
+          // Check if this ticket ID already exists (regardless of date for now)
+          const existingRow = rows.find(row => row && row[1] === ticket.id.toString());
           
           if (existingRow) {
             console.log('FOUND EXISTING EVALUATION in Google Sheets - no OpenAI call needed!');
+            console.log('Existing row data:', existingRow.slice(0, 5)); // First 5 fields for debug
+            
             // Return the existing evaluation from the sheet
             const html = `
               <div style="font-family: Arial, sans-serif; padding: 16px;">
@@ -250,17 +253,20 @@ app.post('/', async (req, res) => {
                 <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
                   <strong style="font-size: 16px;">Overall Score: ${existingRow[4] || 'N/A'}/10</strong>
                 </div>
-                <p style="font-size: 11px; margin: 4px 0;"><strong>Key Improvements:</strong> ${existingRow[9] || 'None'}</p>
+                <p style="font-size: 11px; margin: 4px 0;"><strong>Key Improvements:</strong> ${existingRow[9] || 'No recommendations'}</p>
                 <div style="margin-top: 8px; padding: 8px; background: #f9f9f9; border-radius: 4px;">
-                  <p style="font-size: 10px; color: #666; margin: 0;">Previously evaluated - no duplicate processing</p>
+                  <p style="font-size: 10px; color: #666; margin: 0;">Previously evaluated - using cached result</p>
                 </div>
               </div>
             `;
             return res.json({ html });
+          } else {
+            console.log('No existing evaluation found for this ticket ID');
           }
         }
       } catch (error) {
         console.log('Error checking Google Sheets:', error.message);
+        console.error('Full error:', error);
       }
     }
     
