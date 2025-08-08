@@ -226,7 +226,42 @@ app.post('/', async (req, res) => {
     // CRITICAL: Check Google Sheets for existing evaluation to avoid duplicate OpenAI calls
     if (!evaluationCache.has(cacheKey)) {
       console.log('Not in memory cache, checking Google Sheets for existing evaluation...');
-      // This would require checking the sheet, but for now let's fix the double OpenAI call issue first
+      try {
+        if (sheetsClient) {
+          const existingData = await sheetsClient.spreadsheets.values.get({
+            spreadsheetId: process.env.GOOGLE_SHEET_ID,
+            range: 'Sheet1!A:P'
+          });
+          
+          const rows = existingData.data.values || [];
+          // Check if this ticket ID + response hash already exists
+          const existingRow = rows.find(row => 
+            row[1] === ticket.id.toString() && 
+            row[0] && 
+            row[0].includes(new Date().toISOString().split('T')[0]) // Same day
+          );
+          
+          if (existingRow) {
+            console.log('FOUND EXISTING EVALUATION in Google Sheets - no OpenAI call needed!');
+            // Return the existing evaluation from the sheet
+            const html = `
+              <div style="font-family: Arial, sans-serif; padding: 16px;">
+                <h3>📊 Response Evaluation</h3>
+                <div style="text-align: center; padding: 8px; background: #f0f8f0; border-radius: 4px; margin-bottom: 12px;">
+                  <strong style="font-size: 16px;">Overall Score: ${existingRow[4] || 'N/A'}/10</strong>
+                </div>
+                <p style="font-size: 11px; margin: 4px 0;"><strong>Key Improvements:</strong> ${existingRow[9] || 'None'}</p>
+                <div style="margin-top: 8px; padding: 8px; background: #f9f9f9; border-radius: 4px;">
+                  <p style="font-size: 10px; color: #666; margin: 0;">Previously evaluated - no duplicate processing</p>
+                </div>
+              </div>
+            `;
+            return res.json({ html });
+          }
+        }
+      } catch (error) {
+        console.log('Error checking Google Sheets:', error.message);
+      }
     }
     
     // Check if we already have results
