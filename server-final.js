@@ -209,10 +209,13 @@ app.post('/', async (req, res) => {
 
     // Create cache key from response text
     const cacheKey = `${ticket.id}_${latestResponse.createdAt}`;
+    console.log('Cache key:', cacheKey);
+    console.log('Cache size:', evaluationCache.size);
+    console.log('Cache has key?', evaluationCache.has(cacheKey));
     
     // Check if we already have results
     if (evaluationCache.has(cacheKey)) {
-      console.log('Returning cached evaluation results');
+      console.log('USING CACHED RESULTS - no OpenAI call needed');
       const evaluation = evaluationCache.get(cacheKey);
       
       // Build detailed results HTML
@@ -266,6 +269,7 @@ app.post('/', async (req, res) => {
       ]);
       
       console.log('OpenAI evaluation completed:', evaluation.overall_score);
+      console.log('CACHING RESULT with key:', cacheKey);
       evaluationCache.set(cacheKey, evaluation);
       
       // Save to database
@@ -283,6 +287,7 @@ app.post('/', async (req, res) => {
       evaluateResponse(latestResponse, conversation)
         .then(async (evaluation) => {
           console.log('Background evaluation completed:', evaluation.overall_score);
+          console.log('CACHING BACKGROUND RESULT with key:', cacheKey);
           evaluationCache.set(cacheKey, evaluation);
           
           // Save to database
