@@ -107,10 +107,15 @@ async function initializeDatabase() {
 
 // Save evaluation to Google Sheets - NO CUSTOMER PII
 async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
+  console.log('=== SAVE EVALUATION CALLED ===');
+  console.log('Ticket:', ticketData.number, 'Agent:', agentName);
+  
   if (!sheetsClient) {
-    console.log('Google Sheets not available - skipping save');
+    console.log('ERROR: Google Sheets client not initialized - skipping save');
     return;
   }
+  
+  console.log('Google Sheets client is available, proceeding with save...');
   
   try {
     // DUPLICATE PREVENTION: Try to check for existing entries, but don't fail if there's an issue
@@ -187,7 +192,12 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
     
     console.log('Evaluation saved to Google Sheets for agent:', agentName);
   } catch (error) {
-    console.error('Google Sheets save error:', error);
+    console.error('Google Sheets save error - Full details:', error);
+    console.error('Error message:', error.message);
+    if (error.response) {
+      console.error('Error response:', error.response.data);
+    }
+    throw error; // Re-throw to see it in the calling function
   }
 }
 
@@ -366,7 +376,13 @@ app.post('/', async (req, res) => {
         console.log('Saving new evaluation to Google Sheets for cache key:', cacheKey);
         savedToSheets.add(cacheKey);
         const agentName = latestResponse.createdBy?.first || 'Unknown';
-        await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
+        try {
+          await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
+        } catch (saveError) {
+          console.error('Failed to save evaluation to Google Sheets:', saveError);
+          // Remove from savedToSheets so it can be retried
+          savedToSheets.delete(cacheKey);
+        }
       } else {
         console.log('Skipping Google Sheets save - already saved for cache key:', cacheKey);
       }
@@ -393,7 +409,13 @@ app.post('/', async (req, res) => {
             console.log('Background: Saving new evaluation to Google Sheets for cache key:', cacheKey);
             savedToSheets.add(cacheKey);
             const agentName = latestResponse.createdBy?.first || 'Unknown';
-            await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
+            try {
+              await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
+            } catch (saveError) {
+              console.error('Background: Failed to save evaluation to Google Sheets:', saveError);
+              // Remove from savedToSheets so it can be retried
+              savedToSheets.delete(cacheKey);
+            }
           } else {
             console.log('Background: Skipping Google Sheets save - already saved for cache key:', cacheKey);
           }
