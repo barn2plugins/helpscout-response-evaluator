@@ -377,7 +377,10 @@ app.post('/', async (req, res) => {
       res.json({ html });
       
     } catch (timeoutError) {
-      console.log('OpenAI taking too long, falling back to background processing...');
+      console.log('Help Scout timeout reached, continuing in background...');
+      
+      // Remove from processing set immediately to avoid blocking future requests
+      processingKeys.delete(cacheKey);
       
       // Start background evaluation for manual refresh
       evaluateResponse(latestResponse, conversation)
@@ -395,30 +398,22 @@ app.post('/', async (req, res) => {
               await saveEvaluation(ticket, agentName, latestResponse.text, evaluation);
             } catch (saveError) {
               console.error('Background: Failed to save evaluation to Google Sheets:', saveError);
-              // Remove from savedToSheets so it can be retried
               savedToSheets.delete(cacheKey);
             }
-          } else {
-            console.log('Background: Skipping Google Sheets save - already saved for cache key:', cacheKey);
           }
-          
-          // Remove from processing set - background evaluation complete
-          processingKeys.delete(cacheKey);
         })
         .catch(error => {
           console.error('Background evaluation failed:', error.message);
           evaluationCache.set(cacheKey, { overall_score: 0, error: error.message });
-          // Remove from processing set even on error
-          processingKeys.delete(cacheKey);
         });
       
-      // Return processing message for manual refresh
+      // Return friendly processing message (not "Error")
       const html = `
         <div style="font-family: Arial, sans-serif; padding: 16px;">
-          <h3>📊 Response Evaluation</h3>
-          <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px;">
-            <p style="margin: 4px 0;"><strong>Status:</strong> Processing with OpenAI...</p>
-            <p style="font-size: 10px; color: #666; margin: 4px 0;">Please refresh to view recommendations</p>
+          <h3 style="margin: 0 0 12px 0;">📊 Response Evaluation</h3>
+          <div style="text-align: center; padding: 12px; background: #f0f8ff; border-radius: 4px; border-left: 4px solid #4CAF50;">
+            <p style="margin: 4px 0; font-weight: bold;">⏳ Evaluation in Progress</p>
+            <p style="font-size: 11px; color: #666; margin: 8px 0 0 0;">Please refresh in a moment to view the results</p>
           </div>
         </div>
       `;
