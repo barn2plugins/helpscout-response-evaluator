@@ -108,18 +108,25 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
       categories.following_structure?.feedback || '' // Structure_Feedback
     ];
 
-    await sheetsClient.spreadsheets.values.append({
+    console.log('About to append to Google Sheets...');
+    console.log('Spreadsheet ID:', process.env.GOOGLE_SHEET_ID);
+    console.log('Row data:', JSON.stringify(rowData, null, 2));
+    
+    const result = await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:T', // Append to columns A through T (including feedback columns)
+      range: 'Sheet1!A:T',
       valueInputOption: 'USER_ENTERED',
       resource: {
         values: [rowData]
       }
     });
     
+    console.log('Google Sheets append result:', JSON.stringify(result.data, null, 2));
     console.log('Evaluation saved to Google Sheets for agent:', agentName);
   } catch (error) {
-    console.error('Google Sheets save error:', error);
+    console.error('Google Sheets save FAILED:', error.message);
+    console.error('Full error:', JSON.stringify(error.response?.data || error, null, 2));
+    throw error;
   }
 }
 
@@ -207,11 +214,19 @@ app.post('/', async (req, res) => {
 
     console.log('Found team response, length:', latestResponse.text?.length || 0);
 
-    // Create cache key from response text
-    const cacheKey = `${ticket.id}_${latestResponse.createdAt}`;
+    // Create cache key from response content hash (persistent across restarts)
+    const crypto = require('crypto');
+    const responseHash = crypto.createHash('md5').update(latestResponse.text).digest('hex').substring(0, 8);
+    const cacheKey = `${ticket.id}_${responseHash}`;
     console.log('Cache key:', cacheKey);
     console.log('Cache size:', evaluationCache.size);
     console.log('Cache has key?', evaluationCache.has(cacheKey));
+    
+    // CRITICAL: Check Google Sheets for existing evaluation to avoid duplicate OpenAI calls
+    if (!evaluationCache.has(cacheKey)) {
+      console.log('Not in memory cache, checking Google Sheets for existing evaluation...');
+      // This would require checking the sheet, but for now let's fix the double OpenAI call issue first
+    }
     
     // Check if we already have results
     if (evaluationCache.has(cacheKey)) {
