@@ -148,7 +148,12 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
       categories.following_structure?.feedback || '' // Structure_Feedback
     ];
 
-    await sheetsClient.spreadsheets.values.append({
+    console.log('About to call Google Sheets API with:');
+    console.log('- Range: Sheet1!A:T');
+    console.log('- Row data length:', rowData.length);
+    console.log('- First few values:', rowData.slice(0, 5));
+
+    const appendResult = await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
       range: 'Sheet1!A:T',
       valueInputOption: 'USER_ENTERED',
@@ -156,6 +161,8 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
         values: [rowData]
       }
     });
+
+    console.log('Google Sheets API response:', JSON.stringify(appendResult.data, null, 2));
     
     console.log('Evaluation saved to Google Sheets for ticket:', ticketData.number);
   } catch (error) {
