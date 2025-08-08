@@ -231,7 +231,7 @@ app.post('/', async (req, res) => {
           console.log('Fetching existing data from Google Sheets...');
           const existingData = await sheetsClient.spreadsheets.values.get({
             spreadsheetId: process.env.GOOGLE_SHEET_ID,
-            range: 'Sheet1!A:P'
+            range: 'Sheet1!A1:P1000'  // Get first 1000 rows explicitly
           });
           
           const rows = existingData.data.values || [];
