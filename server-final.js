@@ -107,10 +107,18 @@ async function initializeDatabase() {
 
 // Save evaluation to Google Sheets
 async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
+  console.log('=== saveEvaluation CALLED ===');
+  console.log('Ticket:', ticketData.number, 'ID:', ticketData.id);
+  console.log('Agent:', agentName);
+  console.log('Response length:', responseText?.length);
+  console.log('Sheet ID:', process.env.GOOGLE_SHEET_ID);
+  
   if (!sheetsClient) {
-    console.log('Google Sheets not available - skipping save');
+    console.log('ERROR: Google Sheets client not available - skipping save');
     return;
   }
+  
+  console.log('Google Sheets client exists, attempting save...');
   
   try {
     const categories = evaluation.categories || {};
@@ -152,6 +160,9 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
     console.log('Evaluation saved to Google Sheets for ticket:', ticketData.number);
   } catch (error) {
     console.error('Google Sheets save error:', error.message);
+    console.error('Full error details:', JSON.stringify(error.response?.data || error, null, 2));
+    // Re-throw so calling function sees the error
+    throw error;
   }
 }
 
