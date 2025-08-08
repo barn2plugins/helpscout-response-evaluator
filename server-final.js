@@ -84,28 +84,24 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
     
-    // Prepare the row data matching our sheet columns
+    // Prepare the row data matching your sheet columns exactly
     const rowData = [
-      now, // Evaluation_Date
-      ticketData.id, // Ticket_ID
-      ticketData.number, // Ticket_Number
-      agentName, // Agent_Name
-      customerName, // Customer_Name
-      evaluation.overall_score, // Overall_Score
-      categories.tone_empathy?.score || 0, // Tone_Score
-      categories.clarity_completeness?.score || 0, // Clarity_Score
-      categories.standard_of_english?.score || 0, // English_Score
-      categories.problem_resolution?.score || 0, // Resolution_Score
-      categories.following_structure?.score || 0, // Structure_Score
-      Array.isArray(evaluation.key_improvements) ? evaluation.key_improvements.join('; ') : (evaluation.key_improvements || 'None'), // Key_Improvements
-      responseText, // Response_Text
-      contextText, // Conversation_Context
-      responseText.length, // Response_Length
-      categories.tone_empathy?.feedback || '', // Tone_Feedback
-      categories.clarity_completeness?.feedback || '', // Clarity_Feedback
-      categories.standard_of_english?.feedback || '', // English_Feedback
-      categories.problem_resolution?.feedback || '', // Resolution_Feedback
-      categories.following_structure?.feedback || '' // Structure_Feedback
+      now, // Date
+      ticketData.id, // Ticket ID
+      ticketData.number, // Ticket Number
+      agentName, // Agent Name
+      evaluation.overall_score, // Overall Score
+      categories.tone_empathy?.score || 0, // Tone Score
+      categories.clarity_completeness?.score || 0, // Clarity Score
+      categories.standard_of_english?.score || 0, // English Score
+      categories.problem_resolution?.score || 0, // Resolution Score
+      Array.isArray(evaluation.key_improvements) ? evaluation.key_improvements.join('; ') : (evaluation.key_improvements || 'No recommendations'), // Response Text (Key Improvements)
+      responseText, // Conversation Context (Response Text)
+      responseText.length, // Response Length
+      categories.tone_empathy?.feedback || '', // Tone Empathy
+      categories.clarity_completeness?.feedback || '', // Clarity
+      categories.standard_of_english?.feedback || '', // English
+      categories.problem_resolution?.feedback || '' // Problem Resolution
     ];
 
     console.log('About to append to Google Sheets...');
