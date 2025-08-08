@@ -110,18 +110,23 @@ async function saveEvaluation(ticketData, agentName, customerName, responseText,
 
     console.log('About to append to Google Sheets...');
     console.log('Spreadsheet ID:', process.env.GOOGLE_SHEET_ID);
+    console.log('Row data length:', rowData.length);
     console.log('Row data:', JSON.stringify(rowData, null, 2));
+    console.log('Sheets client available:', !!sheetsClient);
     
     const result = await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:T',
+      range: 'Sheet1!A:A', // Simple range to append to next available row
       valueInputOption: 'USER_ENTERED',
       resource: {
         values: [rowData]
       }
     });
     
-    console.log('Google Sheets append result:', JSON.stringify(result.data, null, 2));
+    console.log('Google Sheets append SUCCESS!');
+    console.log('Result data:', JSON.stringify(result.data, null, 2));
+    console.log('Updated range:', result.data.updates?.updatedRange);
+    console.log('Updated rows:', result.data.updates?.updatedRows);
     console.log('Evaluation saved to Google Sheets for agent:', agentName);
   } catch (error) {
     console.error('Google Sheets save FAILED:', error.message);
