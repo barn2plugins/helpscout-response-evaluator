@@ -105,65 +105,24 @@ async function initializeDatabase() {
   }
 }
 
-// Save evaluation to Google Sheets - NO CUSTOMER PII
+// Save evaluation to Google Sheets
 async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
-  console.log('=== SAVE EVALUATION CALLED ===');
-  console.log('Ticket:', ticketData.number, 'Agent:', agentName);
-  
   if (!sheetsClient) {
-    console.log('ERROR: Google Sheets client not initialized - skipping save');
+    console.log('Google Sheets not available - skipping save');
     return;
   }
   
-  console.log('Google Sheets client is available, proceeding with save...');
-  
   try {
-    // DUPLICATE PREVENTION: Try to check for existing entries, but don't fail if there's an issue
-    try {
-      const existingData = await sheetsClient.spreadsheets.values.get({
-        spreadsheetId: process.env.GOOGLE_SHEET_ID,
-        range: 'Sheet1!B:M', // Get columns B (Ticket_ID) and M (Response_Text)
-      });
-      
-      if (existingData.data.values && existingData.data.values.length > 1) {
-        // Skip header row if present
-        const dataRows = existingData.data.values.slice(1);
-        
-        for (const row of dataRows) {
-          const existingTicketId = row[0]; // Column B (Ticket_ID)
-          const existingResponseText = row[11]; // Column M (Response_Text) - 11th index from B
-          
-          // Check if same ticket with same response already exists
-          if (existingTicketId === ticketData.id && existingResponseText) {
-            // Compare first 200 chars to handle any truncation
-            const existingPreview = existingResponseText.substring(0, 200);
-            const newPreview = responseText.substring(0, 200);
-            
-            if (existingPreview === newPreview) {
-              console.log(`DUPLICATE DETECTED: Ticket ${ticketData.number} with same response already in Google Sheets - skipping save`);
-              return; // Don't save duplicate
-            }
-          }
-        }
-      }
-      console.log(`DUPLICATE CHECK PASSED: Proceeding with save for ticket ${ticketData.number}`);
-    } catch (dupCheckError) {
-      // If duplicate check fails, log it but continue with save
-      console.log('WARNING: Duplicate check failed, proceeding with save anyway:', dupCheckError.message);
-    }
-    
     const categories = evaluation.categories || {};
     const now = new Date().toISOString();
     
-    console.log(`SAVING NEW ENTRY: Ticket ${ticketData.number} (${ticketData.id})`);
-    
-    // Prepare the row data WITHOUT any customer information
+    // Prepare the row data - keeping the same structure that was working
     const rowData = [
       now, // Evaluation_Date
       ticketData.id, // Ticket_ID
       ticketData.number, // Ticket_Number
       agentName, // Agent_Name
-      '', // Customer_Name - REMOVED for privacy
+      '', // Customer_Name - empty for privacy
       evaluation.overall_score, // Overall_Score
       categories.tone_empathy?.score || 0, // Tone_Score
       categories.clarity_completeness?.score || 0, // Clarity_Score
@@ -171,8 +130,8 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
       categories.problem_resolution?.score || 0, // Resolution_Score
       categories.following_structure?.score || 0, // Structure_Score
       (evaluation.key_improvements || []).join('; '), // Key_Improvements
-      responseText, // Response_Text - RESTORED: Full response text for analysis
-      '', // Conversation_Context - Empty for privacy but keeping column structure
+      responseText, // Response_Text - full text
+      '', // Conversation_Context - empty for privacy
       responseText.length, // Response_Length
       categories.tone_empathy?.feedback || '', // Tone_Feedback
       categories.clarity_completeness?.feedback || '', // Clarity_Feedback
@@ -183,21 +142,16 @@ async function saveEvaluation(ticketData, agentName, responseText, evaluation) {
 
     await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:T', // Append to columns A through T (including feedback columns)
+      range: 'Sheet1!A:T',
       valueInputOption: 'USER_ENTERED',
       resource: {
         values: [rowData]
       }
     });
     
-    console.log('Evaluation saved to Google Sheets for agent:', agentName);
+    console.log('Evaluation saved to Google Sheets for ticket:', ticketData.number);
   } catch (error) {
-    console.error('Google Sheets save error - Full details:', error);
-    console.error('Error message:', error.message);
-    if (error.response) {
-      console.error('Error response:', error.response.data);
-    }
-    throw error; // Re-throw to see it in the calling function
+    console.error('Google Sheets save error:', error.message);
   }
 }
 
@@ -834,52 +788,81 @@ app.get('/test/sheets', async (req, res) => {
     console.log('Testing Google Sheets connection...');
     console.log('Sheet ID:', process.env.GOOGLE_SHEET_ID);
 
-    // Try to read the first few rows to test connection
-    const testRead = await sheetsClient.spreadsheets.values.get({
-      spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A1:T10', // First 10 rows, all columns
+    // First get spreadsheet metadata to see all sheets/tabs
+    const spreadsheetInfo = await sheetsClient.spreadsheets.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID
     });
 
-    console.log('Google Sheets test read successful');
-    console.log('Rows returned:', testRead.data.values?.length || 0);
+    const sheets = spreadsheetInfo.data.sheets.map(sheet => ({
+      title: sheet.properties.title,
+      sheetId: sheet.properties.sheetId,
+      rowCount: sheet.properties.gridProperties.rowCount,
+      columnCount: sheet.properties.gridProperties.columnCount
+    }));
 
-    // Try to write a test row
+    console.log('Available sheets:', sheets);
+
+    // Read all data from the first sheet to see what's there
+    const firstSheetName = sheets[0]?.title || 'Sheet1';
+    const allData = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: `${firstSheetName}!A:T`
+    });
+
+    console.log('Current data rows:', allData.data.values?.length || 0);
+    if (allData.data.values) {
+      console.log('First few rows:', allData.data.values.slice(0, 5));
+    }
+
+    // Write test data with a unique identifier
+    const timestamp = new Date().toISOString();
     const testRow = [
-      new Date().toISOString(),
-      'TEST_TICKET_ID',
+      timestamp,
+      'TEST_TICKET_ID_' + Date.now(),
       'TEST123',
       'TestAgent',
       '',
       9.0,
       9,8,9,8,9,
-      'Test improvements',
-      'This is a test response to verify Google Sheets integration',
+      'Test improvements ' + timestamp,
+      'This is a test response to verify Google Sheets integration - ' + timestamp,
       '',
       50,
       'Test feedback 1',
-      'Test feedback 2',
+      'Test feedback 2', 
       'Test feedback 3',
       'Test feedback 4',
       'Test feedback 5'
     ];
 
-    await sheetsClient.spreadsheets.values.append({
+    const writeResult = await sheetsClient.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEET_ID,
-      range: 'Sheet1!A:T',
+      range: `${firstSheetName}!A:T`,
       valueInputOption: 'USER_ENTERED',
       resource: {
         values: [testRow]
       }
     });
 
-    console.log('Google Sheets test write successful');
+    console.log('Write result:', writeResult.data);
+
+    // Read the data again to confirm it was written
+    const afterWrite = await sheetsClient.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: `${firstSheetName}!A:T`
+    });
 
     res.json({
       success: true,
       message: 'Google Sheets connection working',
       sheetId: process.env.GOOGLE_SHEET_ID,
-      rowsRead: testRead.data.values?.length || 0,
-      testRowAdded: true,
+      availableSheets: sheets,
+      targetSheet: firstSheetName,
+      rowsBeforeWrite: allData.data.values?.length || 0,
+      rowsAfterWrite: afterWrite.data.values?.length || 0,
+      testRowTimestamp: timestamp,
+      writeRange: writeResult.data.tableRange,
+      sheetUrl: `https://docs.google.com/spreadsheets/d/${process.env.GOOGLE_SHEET_ID}`,
       timestamp: new Date().toISOString()
     });
 
@@ -888,6 +871,7 @@ app.get('/test/sheets', async (req, res) => {
     res.status(500).json({
       error: 'Google Sheets test failed',
       message: error.message,
+      details: error.response?.data || 'No additional details',
       sheetId: process.env.GOOGLE_SHEET_ID || 'NOT_SET',
       timestamp: new Date().toISOString()
     });
