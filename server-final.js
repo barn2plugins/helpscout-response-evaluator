@@ -791,6 +791,35 @@ app.get('/widget', (req, res) => {
   `);
 });
 
+// Cache management endpoint
+app.get('/cache/clear', (req, res) => {
+  const previousSize = evaluationCache.size;
+  const previousSavedSize = savedToSheets.size;
+  
+  evaluationCache.clear();
+  savedToSheets.clear();
+  processingKeys.clear();
+  
+  console.log(`Cache cleared! Previous cache size: ${previousSize}, Previous saved tracking: ${previousSavedSize}`);
+  
+  res.json({
+    message: 'Cache cleared successfully',
+    previousCacheSize: previousSize,
+    previousSavedSize: previousSavedSize,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Cache status endpoint
+app.get('/cache/status', (req, res) => {
+  res.json({
+    cacheSize: evaluationCache.size,
+    savedToSheetsSize: savedToSheets.size,
+    processingSize: processingKeys.size,
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Help Scout Response Evaluator with Google Sheets running on 0.0.0.0:${PORT}`);
 });
